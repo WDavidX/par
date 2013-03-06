@@ -17,4 +17,4 @@ SOURCE = getopt.c all_common.c all_cmdline.c util.c omp_nbrs.c omp_main.c
 EXE = ompsd
 
 default:
-	$(CC) $(CFLAGS) $(LIBS) $(SOURCE) -o $(EXE)
+	$(CC) $(CFLAGS) $(SOURCE) -o $(EXE) $(LIBS) 
