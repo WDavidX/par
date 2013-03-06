@@ -1,0 +1,236 @@
+For the programming assignments we will use the parallel-1.cselabs.umn.edu through parallel-9.cselabs.umn.edu. These machines are Dell Precision workstations with dual socket quad-core processors equipped with a GTX 490 card (soon). 
+
+You need to have a CSE labs account to access machines in this cluster. If you don't have a CSE Labs account, then you can sign up for one here https://wwws.cs.umn.edu/account-management/
+
+The following are some general instructions on how to get your MPI/OpenMP/pthreads/Cuda codes compiled and running: 
+
+MPI on CSE Labs
+
+
+1. Login into one of the following machines: parallel-1.cselabs.umn.edu to parallel-9.cselabs.umn.edu 
+ 
+2. Load the MPI modules: 
+module load hpc/openmpi 
+module initadd hpc/openmpi 
+
+3. Using your favorite text editor create a file named "hosts" in your $HOME directory. The file should contain the following list of hostnames:
+parallel-1.cselabs.umn.edu:2
+parallel-2.cselabs.umn.edu:2
+parallel-3.cselabs.umn.edu:2
+parallel-4.cselabs.umn.edu:2
+parallel-5.cselabs.umn.edu:2
+parallel-6.cselabs.umn.edu:2
+parallel-7.cselabs.umn.edu:2
+parallel-8.cselabs.umn.edu:2
+parallel-9.cselabs.umn.edu:2 
+
+4. Setup password-less SSH (required for OpenMPI): 
+ssh-keygen -t rsa -P "" 
+cat ~/.ssh/id_rsa.pub > ~/.ssh/authorized_keys 
+
+To add all the machines into ~/.ssh/known_hosts file, ssh once to all the machines in the hosts file. By doing this you won't be prompted for a confirmation when you run a MPI program involving multiple machines. Say 'yes' when ssh prompts for confirmation.
+ 
+Using tcsh (default):
+ 
+foreach i ( `seq 1 9` )
+  ssh-keyscan parallel-${i}.cselabs.umn.edu
+end
+ 
+Using bash:
+ 
+ssh-keyscan parallel-${1..9}.cselabs.umn.edu
+
+5. To test MPI, create a test file "hello_mpi.c" 
+#include <mpi.h> // remember to include the mpi header
+#include <stdio.h>
+
+int main(int argc, char *argv[])
+{
+
+int num_procs, myid, name_len;
+char proc_name[MPI_MAX_PROCESSOR_NAME];
+
+// Initialize MPI
+MPI_Init(&argc, &argv);
+
+// Obtain the number of processes
+MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
+
+// Obtain the process id
+MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+
+// Obtain name of machine process is executing on
+MPI_Get_processor_name(proc_name, &name_len);
+
+printf("Hello World from processor %d out of %d, executing on %s\n",
+myid, num_procs, proc_name);
+
+// Last call to MPI (REQUIRED)
+MPI_Finalize();
+
+return 0;
+} 
+
+6. Compile the program: $mpicc -o hello_mpi.ex hello_mpi.c 
+
+7. Run your compiled program: $mpirun --hostfile ~/hosts -np 4 ./hello_mpi.ex
+- here "4" is the number of processors
+
+
+OpenMP on CSE Labs
+
+
+1. Login into one of the following machines: parallel-1.cselabs.umn.edu to parallel-9.cselabs.umn.edu 
+
+2. To test OpenMP create a test source file "hello_omp.c"
+#include <omp.h> // Remember to include the OpenMP Header
+#include <stdio.h>
+
+/* Define the number of threads
+* This can be done two ways:
+* 1: Define the number of threads within the program by using the
+* function call "omp_set_num_threads()" as is done in this program
+* 2: Set the environment variable OMP_NUM_THREADS, e.g.
+* > setenv OMP_NUM_THREADS 15
+* (To use this method, you must remove the function call
+* omp_set_num_threads() from below)
+*/
+#define NUM_THREADS 15
+
+int main(int argc, char *argv[])
+{
+
+int myid;
+
+// set the number of threads to use
+omp_set_num_threads(NUM_THREADS);
+
+/* Define a parallel segment within the code
+* A total of NUM_THREADS threads will be created and execute
+* the following code in parallel
+* myid is declared as a private variable (each thread will have
+* access to a unique memory address for myid, versus a public variable where
+* each thread would point to the same memory address for myid)
+*/
+#pragma omp parallel private(myid)
+{
+myid = omp_get_thread_num();
+
+printf("Hello World from thread %d\n", myid);
+}
+
+} 
+
+3. Compile the test code: $cc -fopenmp -o hello_omp.ex hello_omp.c 
+
+4. Execute the compiled code: $./hello_omp.ex 
+
+
+
+PThreads on CSE Labs
+
+
+1. Login into one of the following machines: parallel-1.cselabs.umn.edu to parallel-9.cselabs.umn.edu 
+
+2. To test PThreads create a test source file "hello_pthreads.c"
+#include <pthread.h> // remember to include the pthread header
+#include <stdio.h>
+#include <stdlib.h>
+
+// Define the number of threads to create
+#define NUM_THREADS 20
+
+void *hello(void *id);
+
+int main(int argc, char *argv[])
+{
+
+int myid, worker, val;
+
+pthread_t threads[NUM_THREADS];
+
+// Create the threads and have them start executing the function hello()
+for(worker = 0; worker < NUM_THREADS; worker++)
+{
+val = pthread_create(&threads[worker], NULL, hello, (void *) worker);
+if(val != 0)
+{
+printf("Error creating thread #%d, val = %d\n", worker, val);
+exit(-1);
+}
+}
+
+pthread_exit(NULL);
+}
+
+void *hello(void *id)
+{
+int myid;
+myid = (int) id;
+printf("Hello World from thread %d\n", myid);
+pthread_exit(NULL); //terminate the thread
+} 
+
+3. Compile the test code: $cc -pthread -o hello_pthreads.ex hello_pthreads.c 
+
+4. Execute the compiled code: $./hello_pthreads.ex 
+
+
+
+CUDA on CSE Labs
+
+
+1. Login into one of the following machines: parallel-1.cselabs.umn.edu to parallel-9.cselabs.umn.edu 
+
+2. Load the CUDA modules: 
+module load soft/cuda
+module initadd soft/cuda
+
+3. To test CUDA create a test source file "hello_cuda.cu"
+// Borrowed from http://computer-graphics.se/hello-world-for-cuda.html
+// This program takes the string "Hello ", prints it, then passes it to CUDA with an array
+// of offsets. Then the offsets are added in parallel to produce the string "World!"
+// By Ingemar Ragnemalm 2010
+
+#include <stdio.h>
+
+const int N = 16; 
+const int blocksize = 16; 
+
+__global__ 
+void hello(char *a, int *b) 
+{
+a[threadIdx.x] += b[threadIdx.x];
+}
+
+int main()
+{
+char a[N] = "Hello \0\0\0\0\0\0";
+int b[N] = {15, 10, 6, 0, -11, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+char *ad;
+int *bd;
+const int csize = N*sizeof(char);
+const int isize = N*sizeof(int);
+
+printf("%s", a);
+
+cudaMalloc( (void**)&ad, csize ); 
+cudaMalloc( (void**)&bd, isize ); 
+cudaMemcpy( ad, a, csize, cudaMemcpyHostToDevice ); 
+cudaMemcpy( bd, b, isize, cudaMemcpyHostToDevice ); 
+
+dim3 dimBlock( blocksize, 1 );
+dim3 dimGrid( 1, 1 );
+hello<<<dimGrid, dimBlock>>>(ad, bd);
+cudaMemcpy( a, ad, csize, cudaMemcpyDeviceToHost ); 
+cudaFree( ad );
+
+printf("%s\n", a);
+return EXIT_SUCCESS;
+} 
+
+
+4. Compile the sample code: $nvcc -o hello_cuda.ex hello_cuda.cu 
+
+5. Execute the compiled code: $./hello_cuda.ex 
