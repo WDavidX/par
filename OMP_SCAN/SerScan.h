@@ -30,9 +30,11 @@ typedef struct {
   double timer_2;
   double timer_3;
   double timer_4;
-  int nthreads;
+  int nthreads,nlevels,nalloc;
   int *a;
   int *b;
+  int *c;
+  char *f,*fb;
 } params_t;
 
 
