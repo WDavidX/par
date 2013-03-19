@@ -34,7 +34,8 @@ int main(int argc, char *argv[]) {
 	OMP_RestoreInput(&par);
 	Scan_Serial_Seq(&par);
 	gk_stopwctimer(par.timer_global);
-	printf("  wclock         (sec): \t%.6lf\n", gk_getwctimer(par.timer_global));
+	printf("  wclock         (sec): \t%.6lf\n",
+			gk_getwctimer(par.timer_global));
 	printf("  timer1  Sscan  (sec): \t%.6lf\n", gk_getwctimer(par.timer_1));
 	printf("  timer2  Scan   (sec): \t%.6lf\n", gk_getwctimer(par.timer_2));
 	printf("  timer3  Serial (sec): \t%.6lf\n", gk_getwctimer(par.timer_3));
@@ -111,7 +112,7 @@ void OMP_Sscan(params_t *par) {
 	for (d = 1; d < par->nlevels; ++d) {
 		levelstep2d1 = levelstep2d * 2;
 #pragma omp parallel for shared(par,levelstep2d,levelstep2d1) \
-		schedule(dynamic, 64)
+		schedule(static)
 		for (k = 0; k < par->nalloc; k = k + levelstep2d1) {
 			if (!par->f[k + levelstep2d1 - 1])
 				par->a[k + levelstep2d1 - 1] = par->a[k + levelstep2d - 1]
@@ -141,7 +142,7 @@ void OMP_Sscan(params_t *par) {
 	for (d = par->nlevels - 1; d >= 0; --d) {
 		levelstep2d1 = levelstep2d * 2;
 #pragma omp parallel for shared(par,levelstep2d,levelstep2d1) \
-		schedule(dynamic, 64)
+		schedule(static)
 		for (k = 0; k < par->nalloc; k = k + levelstep2d1) {
 			t = par->a[k + levelstep2d - 1];
 			par->a[k + levelstep2d - 1] = par->a[k + levelstep2d1 - 1];
@@ -165,7 +166,7 @@ void OMP_Sscan(params_t *par) {
 	gk_stopwctimer(par->timer_1);
 
 #pragma omp parallel for shared(par,levelstep2d,levelstep2d1) \
-		schedule(dynamic, 64)
+		schedule(static)
 	for (k = 0; k < par->nlines; k = k + 1) {
 		par->a[k] = par->b[k] + par->a[k];
 	}
@@ -218,7 +219,7 @@ void OMP_Scan(params_t *par) {
 	for (d = 1; d < par->nlevels; ++d) {
 		levelstep2d1 = levelstep2d * 2;
 #pragma omp parallel for shared(par,levelstep2d,levelstep2d1) \
-		schedule(dynamic, 64)
+		schedule(static)
 		for (k = 0; k < par->nalloc; k = k + levelstep2d1) {
 			par->a[k + levelstep2d1 - 1] = par->a[k + levelstep2d - 1]
 					+ par->a[k + levelstep2d1 - 1];
@@ -242,7 +243,7 @@ void OMP_Scan(params_t *par) {
 	for (d = par->nlevels - 1; d >= 0; --d) {
 		levelstep2d1 = levelstep2d * 2;
 #pragma omp parallel for shared(par,levelstep2d,levelstep2d1) \
-		schedule(dynamic, 64)
+		schedule(static)
 		for (k = 0; k < par->nalloc; k = k + levelstep2d1) {
 			t = par->a[k + levelstep2d - 1];
 			par->a[k + levelstep2d - 1] = par->a[k + levelstep2d1 - 1];

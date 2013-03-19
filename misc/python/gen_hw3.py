@@ -18,6 +18,6 @@ for k in xrange(0,num,1):
 	fout.write(str(r)+"\n")
 
 fout.close()
-print "========================" + filename +"========================"
+print "======================== " + filename +" ========================"
 #os.system('cat '+filename)
 
