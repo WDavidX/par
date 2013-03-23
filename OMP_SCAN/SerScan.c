@@ -23,23 +23,38 @@ int main(int argc, char *argv[]) {
 	gk_clearwctimer(par.timer_4);
 	gk_startwctimer(par.timer_global);
 	int k;
-	printf("\nScan - OMP_SCAN\n");
+	printf("\nScan - OMP_Scan\n");
 	gk_startwctimer(par.timer_4);
 	cmd_parse(argc, argv, &par);
 	gk_stopwctimer(par.timer_4);
-	OMP_Scan(&par);
-	OMP_RestoreInput(&par);
-	OMP_Sscan(&par);
-	OMP_RestoreInput(&par);
-	Scan_Serial_Seq(&par);
+
+	for (k = 0; k < AVG; ++k) {
+		OMP_Scan(&par);
+		OMP_RestoreInput(&par);
+	}
+
+	WriteOut(&par);
+
+	for (k = 0; k < AVG; ++k) {
+		OMP_Sscan(&par);
+		OMP_RestoreInput(&par);
+	}
+
+	for (k = 0; k < AVG; ++k) {
+		Scan_Serial_Seq(&par);
+		OMP_RestoreInput(&par);
+	}
 	gk_stopwctimer(par.timer_global);
+
 	printf("  wclock         (sec): \t%.6lf\n",
 			gk_getwctimer(par.timer_global));
-	printf("  timer1  Sscan  (sec): \t%.6lf\n", gk_getwctimer(par.timer_1));
 	printf("  timer4  Init   (sec): \t%.6lf\n", gk_getwctimer(par.timer_4));
-	printf("  timer2  Scan   (sec): \t%.6lf\n", gk_getwctimer(par.timer_2));
-	printf("  timer3  Serial (sec): \t%.6lf\n", gk_getwctimer(par.timer_3));
-
+	printf("  timer3  Serial (sec) on %d runs: \t%.6lf\n", AVG,
+			gk_getwctimer(par.timer_3) / (double) AVG);
+	printf("  timer2  Scan   (sec) on %d runs: \t%.6lf\n", AVG,
+			gk_getwctimer(par.timer_2) / (double) AVG);
+	printf("  timer1  Sscan  (sec) on %d runs: \t%.6lf\n", AVG,
+			gk_getwctimer(par.timer_1) / (double) AVG);
 	cleanup(&par);
 	return 0;
 }
@@ -77,7 +92,6 @@ void OMP_Sscan_Init(params_t *par) {
 	while (ct < (int) floor(sqrt(par->nlines))) {
 		int r = rand();
 		i = rand() % par->nlines;
-//		printf("nalloc=%d \t i=%d \t ct=%d \n",par->nalloc,i,ct);
 		if (par->f[i] == 0) {
 			par->f[i] = 1;
 			++ct;
@@ -85,26 +99,14 @@ void OMP_Sscan_Init(params_t *par) {
 
 	}
 
-//	for (k = 0; k < par->nlines; ++k) {
-//		printf("%d ", par->f[k]);
-//	}
-//	printf("\n");
 	memcpy(par->fb, par->f, (1 + par->nalloc) * (sizeof(char)));
 }
 
 void OMP_Sscan(params_t *par) {
-	printf("OMP_Sscan \t");
 	omp_set_num_threads(par->nthreads);
-//		omp_set_num_threads(8);
 	int nlevels = (int) ceil(log(par->nlines) / M_LN2);
 	int d, k, t;
 	int levelstep2d = 1, levelstep2d1;
-
-//	printf("\t");
-//	for (k = 0; k < par->nalloc; ++k) {
-//		printf("%d ", par->a[k]);
-//	}
-//	printf("\n");
 
 	/* ****************** UP SWEEP ******************************/
 	gk_startwctimer(par->timer_1);
@@ -119,24 +121,13 @@ void OMP_Sscan(params_t *par) {
 			par->f[k + levelstep2d1 - 1] = par->f[k + levelstep2d - 1]
 					| par->f[k + levelstep2d1 - 1];
 		}
-//		printf("d=%d\t levelstep2d= %d\n\t", d, levelstep2d);
-//		for (k = 0; k < par->nalloc; ++k) {
-//			printf("%d ", par->a[k]);
-//		}
-//		printf("\n");
 		levelstep2d = levelstep2d * 2;
 	}
 
 	/* ****************** DOWN SWEEP ******************************/
-//	printf("\n\nDown Sweep\n");
 	par->a[par->nalloc - 1] = 0;
 
 	levelstep2d = par->nalloc / 2;
-//	printf("d=%d\t levelstep2d= %d\n\t", d, levelstep2d * 2);
-//	for (k = 0; k < par->nalloc; ++k) {
-//		printf("%d ", par->a[k]);
-//	}
-//	printf("\n");
 
 	for (d = par->nlevels - 1; d >= 0; --d) {
 		levelstep2d1 = levelstep2d * 2;
@@ -155,63 +146,26 @@ void OMP_Sscan(params_t *par) {
 			}
 			par->f[k + levelstep2d - 1] = 0;
 		}
-//		printf("d=%d\t levelstep2d= %d\n\t", d, levelstep2d);
-//		for (k = 0; k < par->nalloc; ++k) {
-//			printf("%d ", par->a[k]);
-//		}
-//		printf("\n");
 		levelstep2d = levelstep2d / 2;
 	}
-	gk_stopwctimer(par->timer_1);
+
 
 #pragma omp parallel for shared(par,levelstep2d,levelstep2d1) \
 		schedule(static)
 	for (k = 0; k < par->nlines; k = k + 1) {
 		par->a[k] = par->b[k] + par->a[k];
 	}
+	gk_stopwctimer(par->timer_1);
+	par->c = par->a;
 
-	par->a[par->nlines] = par->a[par->nlines - 1]
-			* (par->f[par->nlines - 1] == 0) + par->b[par->nlines - 1];
-	par->c = &(par->a[0]);
-
-//	printf("Final results\n");
-//	for (k = 0; k < par->nlines + 1; ++k) {
-//		printf("%3d", par->b[k]);
-//	}
-//	printf("\n");
-//
-//	for (k = 0; k < par->nlines + 1; ++k) {
-//		printf("%3d", par->a[k]);
-//	}
-//	printf("\n");
-//	for (k = 0; k < par->nlines ; ++k) {
-//		printf("%3d", par->c[k]);
-//	}
-//	printf("\n");
-//	for (k = 0; k < par->nlines + 1; ++k) {
-//		printf("%3d", par->fb[k]);
-//	}
-//	printf("\n");
-//	for (k = 0; k < par->nlines + 1; ++k) {
-//		printf("%3d", par->f[k]);
-//	}
-//	printf("\n");
 
 }
 
 void OMP_Scan(params_t *par) {
 	omp_set_num_threads(par->nthreads);
-//		omp_set_num_threads(8);
 	int nlevels = (int) ceil(log(par->nlines) / M_LN2);
-	printf("nlevels=%d\t log(2)=%.6lf\n", nlevels, M_LN2);
 	int d, k, t;
 	int levelstep2d = 1, levelstep2d1;
-
-//	printf("\t");
-//	for (k = 0; k < par->nalloc; ++k) {
-//		printf("%d ", par->a[k]);
-//	}
-//	printf("\n");
 
 	/* ****************** UP SWEEP ******************************/
 	gk_startwctimer(par->timer_2);
@@ -223,22 +177,11 @@ void OMP_Scan(params_t *par) {
 			par->a[k + levelstep2d1 - 1] = par->a[k + levelstep2d - 1]
 					+ par->a[k + levelstep2d1 - 1];
 		}
-//		printf("d=%d\t levelstep2d= %d\n\t", d, levelstep2d);
-//		for (k = 0; k < par->nalloc; ++k) {
-//			printf("%d ", par->a[k]);
-//		}
-//		printf("\n");
 		levelstep2d = levelstep2d * 2;
 	}
 	/* ****************** DOWN SWEEP ******************************/
-//	printf("\n\nDown Sweep\n");
 	par->a[par->nalloc - 1] = 0;
 	levelstep2d = par->nalloc / 2;
-//	printf("d=%d\t levelstep2d= %d\n\t", d, levelstep2d * 2);
-//	for (k = 0; k < par->nalloc; ++k) {
-//		printf("%d ", par->a[k]);
-//	}
-//	printf("\n");
 	for (d = par->nlevels - 1; d >= 0; --d) {
 		levelstep2d1 = levelstep2d * 2;
 #pragma omp parallel for shared(par,levelstep2d,levelstep2d1) \
@@ -248,11 +191,6 @@ void OMP_Scan(params_t *par) {
 			par->a[k + levelstep2d - 1] = par->a[k + levelstep2d1 - 1];
 			par->a[k + levelstep2d1 - 1] = t + par->a[k + levelstep2d1 - 1];
 		}
-//		printf("d=%d\t levelstep2d= %d\n\t", d, levelstep2d);
-//		for (k = 0; k < par->nalloc; ++k) {
-//			printf("%d ", par->a[k]);
-//		}
-//		printf("\n");
 		levelstep2d = levelstep2d / 2;
 	}
 	gk_stopwctimer(par->timer_2);
@@ -267,7 +205,7 @@ void cmd_parse(int argc, char *argv[], params_t *par) {
 	size_t nlines, i;
 	int x;
 	FILE * fin;
-	printf("%d arguments in the command line\n", argc);
+	printf("%d arguments in the command line: nth=%s,  infile=%s \n", argc,argv[1],argv[2]);
 
 	if ((fin = fopen(par->infile, "r")) == NULL ) {
 		fprintf(stderr, "ERROR: Failed to open '%s' for reading\n",
@@ -309,11 +247,6 @@ void cmd_parse(int argc, char *argv[], params_t *par) {
 	} else {
 		par->outfile = argv[4];
 	}
-
-	printf(
-			"File-in: %s \nfile-out: %s \nnth=%d \tnlevels=%d \nnlines=%zu \tnalloc=%d\n",
-			par->infile, par->outfile, par->nthreads, par->nlevels, par->nlines,
-			par->nalloc);
 	memcpy(par->b, par->a, (1 + par->nalloc) * (sizeof(int)));
 
 	/* For Sscan Init */
@@ -334,6 +267,7 @@ void Scan_Serial_Seq(params_t * par) {
 
 void WriteOut(params_t * par) {
 	FILE * fout;
+	printf("nlines=%d\n",par->nlines);
 	if ((fout = fopen(par->outfile, "w")) == NULL ) {
 		fprintf(stderr, "ERROR: Failed to open '%s' for writing\n",
 				par->outfile);
@@ -341,8 +275,9 @@ void WriteOut(params_t * par) {
 	}
 	int i;
 	for (i = 0; i < par->nlines; ++i) {
-		fprintf(fout, "%d\n", par->b[i]);
+//		fprintf(fout, "%d\n", par->c[i]);
 	}
+	printf("cend=%d",par->c[par->nlines-1]);
 	fclose(fout);
 }
 
@@ -351,5 +286,6 @@ void cleanup(params_t *par) {
 	free((void*) par->b);
 	if (!par->f) {
 		free((void*) par->f);
+		free((void*) par->fb);
 	}
 }

@@ -31,7 +31,7 @@ typedef struct {
   double timer_3;
   double timer_4;
   int nthreads,nlevels,nalloc;
-  int *a;
+  int *a;					/* Store the calculated exclusive */
   int *b;
   int *c;
   char *f,*fb;
