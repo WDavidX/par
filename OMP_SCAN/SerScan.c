@@ -2,8 +2,7 @@
 #include "util.c"
 #include "omp.h"
 
-#define VERBOSITY 1
-#define NITERS          20
+#define AVG 100
 
 void cmd_parse(int argc, char *argv[], params_t *par);
 void Scan_Serial_Seq(params_t * par);
@@ -37,9 +36,10 @@ int main(int argc, char *argv[]) {
 	printf("  wclock         (sec): \t%.6lf\n",
 			gk_getwctimer(par.timer_global));
 	printf("  timer1  Sscan  (sec): \t%.6lf\n", gk_getwctimer(par.timer_1));
+	printf("  timer4  Init   (sec): \t%.6lf\n", gk_getwctimer(par.timer_4));
 	printf("  timer2  Scan   (sec): \t%.6lf\n", gk_getwctimer(par.timer_2));
 	printf("  timer3  Serial (sec): \t%.6lf\n", gk_getwctimer(par.timer_3));
-	printf("  timer4  Init   (sec): \t%.6lf\n", gk_getwctimer(par.timer_4));
+
 	cleanup(&par);
 	return 0;
 }
@@ -97,7 +97,6 @@ void OMP_Sscan(params_t *par) {
 	omp_set_num_threads(par->nthreads);
 //		omp_set_num_threads(8);
 	int nlevels = (int) ceil(log(par->nlines) / M_LN2);
-	printf("nlevels=%d\t log(2)=%.6lf\n", nlevels, M_LN2);
 	int d, k, t;
 	int levelstep2d = 1, levelstep2d1;
 

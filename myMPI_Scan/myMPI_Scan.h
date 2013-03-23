@@ -31,7 +31,7 @@ typedef struct {
 	int *a;	// copied array for OMP_Scan
 	int *b; // copied array for myOMP_Scan
 	int *c; // back of of the original array
-	int num_procs,myid, name_len;
+	int num_procs,myid, name_len,idx,power2,minidx;
 	char *proc_name;
 } params_t;
 
