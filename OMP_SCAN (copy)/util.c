@@ -28,22 +28,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-double gk_WClockSeconds(void)
-{
-#ifdef __GNUC__
-  struct timeval ctime;
 
-  gettimeofday(&ctime, NULL);
-
-  return (double)ctime.tv_sec + (double).000001*ctime.tv_usec;
-#else
-  return (double)time(NULL);
-#endif
-}
-#define gk_clearwctimer(tmr) (tmr = 0.0)
-#define gk_startwctimer(tmr) (tmr -= gk_WClockSeconds())
-#define gk_stopwctimer(tmr)  (tmr += gk_WClockSeconds())
-#define gk_getwctimer(tmr)   (tmr)
 
 /* Taken from Unix Systems Programming, Robbins & Robbins, p37 */
 /*

@@ -9,13 +9,14 @@ void Scan_Serial_Seq(params_t * par);
 void WriteOut(params_t * par);
 void cleanup(params_t *par);
 void OMP_Scan(params_t *par);
+void OMP_RestoreInput(params_t *par);
 
 void OMP_Sscan(params_t *par);
 void OMP_Sscan_Init(params_t *par);
 
 int main(int argc, char *argv[]) {
 	params_t par;
-	double timer_scan,timer_serial;
+	double timer_scan;
 	gk_clearwctimer(par.timer_global);
 	gk_clearwctimer(par.timer_1);
 	gk_clearwctimer(par.timer_2);
@@ -39,19 +40,8 @@ int main(int argc, char *argv[]) {
 	}
 	par.timer_2=timer_scan;
 
-	Scan_Serial_Seq(&par);
-	timer_serial=par.timer_3;
 	for (k = 0; k < EXATRA; ++k) {
 		Scan_Serial_Seq(&par);
-		timer_serial=MIN(timer_serial,par.timer_3);
-	}
-	par.timer_3=timer_serial;
-
-	for (k=0;k<par.nlines;++k){
-		if (par.c[k]!=par.d[k]){
-			printf("ERROR occur: k=%d, c=%d, d=%d\n",k,par.c[k],par.d[k]);
-
-		}
 	}
 
 
@@ -77,6 +67,10 @@ int main(int argc, char *argv[]) {
 	return 0;
 }
 
+void OMP_RestoreInput(params_t *par) {
+	memcpy(par->a, par->b, par->nalloc + 1);
+	memcpy(par->f, par->fb, par->nalloc + 1);
+}
 
 void OMP_Sscan_Init(params_t *par) {
 
