@@ -317,3 +317,4 @@ void cleanup(params_t *par) {
 	free((void*) par->b);
 	free((void*) par->c);
 }
+

@@ -47,12 +47,13 @@ int main(int argc, char *argv[]) {
 	}
 	par.timer_3=timer_serial;
 
-//	for (k=0;k<par.nlines;++k){
-//		if (par.c[k]!=par.d[k]){
-//			printf("ERROR occur: k=%d, c=%d, d=%d\n",k,par.c[k],par.d[k]);
-//
-//		}
-//	}
+	for (k=0;k<par.nlines;++k){
+		if (par.c[k]!=par.d[k]){
+			printf("ERROR occur: k=%d, c=%d, d=%d\n",k,par.c[k],par.d[k]);
+
+		}
+	}
+
 
 	WriteOut(&par);
 
@@ -220,12 +221,12 @@ void cmd_parse(int argc, char *argv[], params_t *par) {
 	printf("%d argc: nth=%s,  infile=%s,  \t", argc,
 			argv[1], argv[2]);
 	else if (argc==4)
-		printf("%d argc: nth=%s,  infile=%s,  outfile=%s\t", argc,
+		printf("%d argc: nth=%s,  infile=%s,  outfile=%d\t", argc,
 					argv[1], argv[2],argv[3]);
 	else if (argc<=2)
 		fprintf(stderr,"Wrong number of arguments. argc=%d",argc);
 	else
-		printf("%d argc: nth=%s,  infile=%s,  outfile=%s, more arguments ignored\t", argc,
+		printf("%d argc: nth=%s,  infile=%s,  outfile=%d, more arguments ignored\t", argc,
 							argv[1], argv[2],argv[3]);
 
 	if ((fin = fopen(par->infile, "r")) == NULL ) {
@@ -268,8 +269,7 @@ void cmd_parse(int argc, char *argv[], params_t *par) {
 		par->outfile = (char*) malloc(sizeof(char) * 256);
 		strcpy(par->outfile, "output.txt\0");
 	} else {
-		strcpy(par->outfile, argv[4]);
-//		par->outfile = argv[4];
+		par->outfile = argv[4];
 	}
 	memcpy(par->a, par->b, (1 + par->nalloc) * (sizeof(int)));
 

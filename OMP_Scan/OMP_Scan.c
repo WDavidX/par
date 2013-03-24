@@ -52,7 +52,7 @@ double gk_WClockSeconds(void) {
 #define Tstop(tmr)  (tmr += gk_WClockSeconds())
 #define Tget(tmr)   (tmr)
 
-#define EXATRA 0
+#define EXTRA 999
 #define MIN(a,b) (((a)<(b))?(a):(b))
 
 void cmd_parse(int argc, char *argv[], params_t *par);
@@ -73,24 +73,26 @@ int main(int argc, char *argv[]) {
 	Tclear(par.timer_4);
 	Tstart(par.timer_global);
 	int k;
-	printf("\nScan - OMP_Scan\n");
+	printf("Scan - OMP_Scan\n");
 	Tstart(par.timer_4);
 	cmd_parse(argc, argv, &par);
 	Tstop(par.timer_4);
 
 	Seq_Scan(&par);
 	timer_serial = par.timer_3;
-	for (k = 0; k < EXATRA; ++k) {
+	for (k = 0; k < EXTRA; ++k) {
 		Seq_Scan(&par);
 		timer_serial = MIN(timer_serial,par.timer_3);
 	}
 	par.timer_3 = timer_serial;
 
+
+
 	memcpy(par.a, par.b, (par.nalloc + 1) * sizeof(int));
+
 	OMP_Scan(&par);
 	timer_scan = par.timer_2;
-
-	for (k = 0; k < EXATRA; ++k) {
+	for (k = 0; k < EXTRA; ++k) {
 		memcpy(par.a, par.b, (par.nalloc + 1) * sizeof(int));
 		OMP_Scan(&par);
 		timer_scan = MIN(timer_scan,par.timer_2);
@@ -103,11 +105,11 @@ int main(int argc, char *argv[]) {
 
 	Tstop(par.timer_global);
 
-	printf("  wclock         (sec): \t%.8lf\n", Tget(par.timer_global));
-	printf("  timer4  Init   (sec): \t%.8lf\n", Tget(par.timer_4));
-	printf("  timer3  Serial (sec) on %d runs: \t%.8lf\n", 1 + EXATRA,
+//	printf("  wclock         (sec): \t%.8lf\n", Tget(par.timer_global));
+//	printf("  timer4  Init   (sec): \t%.8lf\n", Tget(par.timer_4));
+	printf("  timer3  Serial (sec) on %d runs: \t%.8lf\n", 1 + EXTRA,
 			Tget(par.timer_3));
-	printf("  timer2  Scan   (sec) on %d runs: \t%.8lf\n", 1 + EXATRA,
+	printf("  timer2  Scan   (sec) on %d runs: \t%.8lf\n", 1 + EXTRA,
 			Tget(par.timer_2));
 
 	cleanup(&par);
@@ -118,11 +120,12 @@ void OMP_Scan(params_t *par) {
 	omp_set_num_threads(par->nthreads);
 //	omp_set_num_threads(8);
 	int nlevels = par->nlevels;
-	printf("nlevels=%d, nalloc=%d\n", par->nlevels, par->nalloc);
+//	printf("nlevels=%d, nalloc=%d\n", par->nlevels, par->nalloc);
 	int d, k, t;
 	int step2d = 1, step2d1;
 
 	/* ****************** UP SWEEP ******************************/
+	Tclear(par->timer_2);
 	Tstart(par->timer_2);
 	for (d = 1; d < par->nlevels; ++d) {
 		step2d1 = step2d * 2;
@@ -223,11 +226,11 @@ void cmd_parse(int argc, char *argv[], params_t *par) {
 	}
 	fclose(fin);
 
+	par->outfile = (char*) malloc(sizeof(char) * 256);
 	if (argc == 3) {
-		par->outfile = (char*) malloc(sizeof(char) * 256);
 		strcpy(par->outfile, "output.txt\0");
 	} else {
-		par->outfile = argv[4];
+		strcpy(par->outfile, argv[3]);
 	}
 	memcpy(par->a, par->b, (1 + par->nalloc) * (sizeof(int)));
 
@@ -239,6 +242,7 @@ void cmd_parse(int argc, char *argv[], params_t *par) {
 
 void Seq_Scan(params_t * par) {
 	int i;
+	Tclear(par->timer_3);
 	Tstart(par->timer_3);
 	if (par->d!=NULL)
 		free((void*)par->d);
