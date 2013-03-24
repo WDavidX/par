@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
 	MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
 	MPI_Comm_rank(MPI_COMM_WORLD, &myid);
 	MPI_Get_processor_name(proc_name, &name_len);
-//	printf("Proc %d/%d,%6s\n", myid, num_procs, proc_name);
+	printf("Proc %d/%d,%6s\n", myid, num_procs, proc_name);
 	par.num_procs = num_procs;
 	par.myid = myid;
 	par.name_len = name_len;
@@ -206,7 +206,7 @@ int myMPI_Scan(const void *sendbuf, void *recvbuf, int count,
 	}
 	memcpy(recvbuf, sendbuf, count * sizeof(int));
 	MPI_Status status;
-	int *tmp = (int*) calloc((par.n), sizeof(int));
+	int *tmp = (int*) calloc(count, sizeof(int));
 	int *recbuf = (int*) recvbuf;
 	int *senbuf = (int*) sendbuf;
 	int levelstep2d = 1, levelstep2d1;
@@ -252,14 +252,12 @@ int myMPI_Scan(const void *sendbuf, void *recvbuf, int count,
 					MPI_Send(recvbuf, count, MPI_INT, noderight, d, comm);
 					MPI_Recv(recvbuf, count, MPI_INT, noderight, d, comm,
 							&status);
-					break;
 				}
 				if (par.myid == noderight) {
-					MPI_Send(recvbuf, count, MPI_INT, nodeleft, d, comm);
 					MPI_Recv(tmp, count, MPI_INT, nodeleft, d, comm, &status);
+					MPI_Send(recvbuf, count, MPI_INT, nodeleft, d, comm);
 					for (m = 0; m < count; ++m)
 						recbuf[m] += tmp[m];
-					break;
 				}
 
 			}
