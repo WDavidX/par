@@ -198,7 +198,8 @@ int main(int argc, char *argv[]) {
 	CreateCSR(&par, &mat);
 	MPI_Barrier(MPI_COMM_WORLD);
 	/* ******************** Step 2: Analyze non-zero entry******************** */
-	IndexCSC(&par, &mat);
+	if (par.id == 0)
+		IndexCSC(&par, &mat);
 	/* ******************** Step 3: Distribute the data ******************** */
 
 	/* ******************** Step 4: Distribute the data ******************** */
@@ -380,7 +381,7 @@ int Step1other(par_t *par) {
 
 void CreateCSR(par_t *par, mat_t *mat) {
 	int k;
-	int showid = 2;
+	int showid = 1;
 	mat->nrow = par->localnrow;
 	mat->nnz = par->localnnz;
 	mat->ncol = par->nrow;
@@ -419,9 +420,10 @@ void CreateCSR(par_t *par, mat_t *mat) {
 }
 
 void IndexCSC(par_t *par, mat_t *mat) {
+	DPRINTF("INDEXING ID %d CSC\n",par->id);
 	int k;
 	int showid = 0;
-	if ((mat->colind) && (mat->colind) && (mat->colind) == 0) {
+	if (((mat->colind) && (mat->colval) && (mat->rowptr)) == 0) {
 		fprintf(stderr, "The CSR form is not ready yet");
 	}
 
@@ -439,7 +441,7 @@ void IndexCSC(par_t *par, mat_t *mat) {
 		else
 			mat->colptr[k] = mat->colptr[k - 1] + mat->marked[k];
 		if (mat->marked[k] != 0) {
-			mat->bsize ++;
+			mat->bsize++;
 			while (k >= par->blkrowst[currentblk + 1]) {
 				currentblk++;
 			}
@@ -460,16 +462,38 @@ void IndexCSC(par_t *par, mat_t *mat) {
 		wcint(mat->marked, mat->ncol, 0, showid);DPRINTF("Current Blk %d, bsize %d, total blkbsize %d\n",currentblk,mat->bsize,s);
 	}
 
-	int *tmpcolcounter;
-	int r,c;
-	int currentrow=0;
-	wcalloc(tmpcolcounter,int,mat->ncol,"temp col counter");
-	for (k=0;k<mat->nnz;++k){
-		//value=colval[k]
-
+	int *tempcolptr;
+	wcalloc(tempcolptr, int, mat->ncol + 1, "temp col ptr for translation");
+	memcpy(tempcolptr, mat->colptr, sizeof(int) * (mat->ncol + 1));
+	if (par->id == showid) {
+		wcint(mat->colptr, (mat->ncol + 1), 0, par->id);
+		wcint(tempcolptr, (mat->ncol + 1), 0, par->id);
+		wcint(mat->colind, (mat->nnz), 0, par->id);
+	}
+	int r, cpt, nnzcounter = 0;
+	for (r = 0; r < mat->nrow; ++r) {
+		for (cpt = mat->rowptr[r]; cpt < mat->rowptr[r + 1]; ++cpt) {
+			nnzcounter++;
+			if (par->id == showid) {
+				DPRINTF("%d \t",nnzcounter);DPRINTF("Current row %d \t",r);DPRINTF("Current col %d \n",mat->colind[cpt]);
+			}
+			mat->rowval[tempcolptr[mat->colind[cpt]]] = mat->colval[cpt];
+			mat->rowind[tempcolptr[mat->colind[cpt]]] = r;
+			tempcolptr[mat->colind[cpt]]++;
+		}
 	}
 
-	wcalloc(mat->b,double,mat->bsize," alloc space for all b that will be used");
+	if (par->id == showid) {
+		DPRINTF("nnzcounter %d, last cpt %d last tempcolptr[mat->colind[cpt]] %d\n",
+				nnzcounter, cpt,tempcolptr[mat->colind[cpt-1]]);
+		wcint(tempcolptr, (mat->ncol + 1), 0, par->id);
+		wcint(mat->colptr, (mat->ncol + 1), 0, par->id);
+		wcint(mat->rowind, (mat->nnz), 0, par->id);
+		wcdouble(mat->rowval, (mat->nnz), 0, par->id);
+		wcdouble(mat->colval, (mat->nnz), 0, par->id);
+
+	}
+	wcalloc(mat->b, double, mat->bsize, " alloc space for all needed b");
 
 }
 
