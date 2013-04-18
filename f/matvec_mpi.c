@@ -61,11 +61,22 @@ int TextLines(char *namestr);
 
 #define wcdouble(a,n,offset,id)\
 	do{ int local_k;\
-	fprintf(stdout,"ID:%2d \tLine %d, ArrayDouble: %s \t Number:%d \t offset %d\n",(id),__LINE__, #a,n,offset);\
+	fprintf(stdout,"ID:%2d \tLine %d, Double: %s  Number:%d  offset %d\n",(id),__LINE__, #a,n,offset);\
 		for (local_k=0;local_k<n;++local_k)\
-			fprintf(stdout,"ID %d %s[%d] = %5.3lf\n",(id),#a,(local_k+offset),(a[local_k]));\
+			fprintf(stdout,"ID %d %s[%d] = %5.2lf\n",(id),#a,(local_k+offset),(a[local_k]));\
 	}while(0)
 
+#ifdef DEBUG
+#define wcary(a,b,n,id)\
+	do{ int local_k;\
+		for (local_k=0;local_k<n;++local_k){\
+			if (a[local_k]!=b[local_k]){\
+			fprintf(stdout,"Unequal entry ID %d \t %s[%d] = %d; %s[%d] = %d\n",(id),#a,local_k,a[local_k],#b,local_k,b[local_k]);\
+			exit(1);}}\
+	}while(0)
+#else
+#defin wcary(a,b,n,id) do{} while(0)
+#endif
 #define wcfree(PTR,ERRMSG)\
 	do{\
 	if (PTR==NULL)\
@@ -116,6 +127,9 @@ typedef struct {
 	double *localval;
 	int localnrow;
 	int localnnz;
+
+	/* ********** Final output ********** */
+	double *finalout;
 } par_t;
 
 typedef struct {
@@ -132,8 +146,10 @@ typedef struct {
 	int *colptr;
 	/* ********** All needed vector entries ********** */
 	double *b;
-	int *marked;
-	int *blkbsize;   // how many vector entries need from all blocks, sizrof np;
+	int *marked;     // mark the entries that will be used
+	int *needbidx;   // store the index of b's entry that is used at least once
+	int *nonlocalbst;  // nonlocal b start index in needbidx size of np+1
+	int *blkbsize;    // number of needed from each block
 	int bsize;   // how many vector entries need from all blocks, sizrof np;
 	/* ********** Output vector ********** */
 	double *vout; // should have size of localnrows
@@ -151,11 +167,16 @@ int Step1other(par_t *par);
 void Init(par_t *par, mat_t *mat);
 void CreateCSR(par_t *par, mat_t *mat);
 void IndexCSC(par_t *par, mat_t *mat);
+void DeterminNonlocalb(par_t *par, mat_t *mat);
+void TransferVector(par_t *par, mat_t *mat);
+void ComputeOutput(par_t *par, mat_t *mat);
+void GatherOutput(par_t *par, mat_t *mat);
+void WriteOutput(par_t *par, mat_t *mat);
 
 /*
  // int MPI_Send(void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 
- int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
+ // int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
 
  int MPI_Bcast( void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm comm )
 
@@ -184,8 +205,12 @@ int main(int argc, char *argv[]) {
 		par.fmat = par.fvec = par.fout = NULL;
 	};
 
-	DPRINTF("Proc %d of %d, %s, fmat=%s, fvec=%s\n", par.id, par.np,
-			par.proc_name, par.fmat, par.fvec);
+	if (par.id == 0) {
+		DPRINTF("Proc %d of %d, %s, fmat=%s, fvec=%s\n", par.id, par.np,
+				par.proc_name, par.fmat, par.fvec);
+	} else {
+		DPRINTF("Proc %d of %d, %s\n", par.id, par.np,par.proc_name);
+	}
 	MPI_Barrier(MPI_COMM_WORLD);
 
 	/* ******************** Step 1: Distribute the data ******************** */
@@ -198,20 +223,29 @@ int main(int argc, char *argv[]) {
 	CreateCSR(&par, &mat);
 	MPI_Barrier(MPI_COMM_WORLD);
 	/* ******************** Step 2: Analyze non-zero entry******************** */
-	if (par.id == 0)
-		IndexCSC(&par, &mat);
+	IndexCSC(&par, &mat);
+	DeterminNonlocalb(&par, &mat);
 	/* ******************** Step 3: Distribute the data ******************** */
 
 	/* ******************** Step 4: Distribute the data ******************** */
 
-	/* ******************** Step 5: Distribute the data ******************** */
+	/* ******************** Step 5: Actual transfer the data ******************** */
+	MPI_Barrier(MPI_COMM_WORLD);
+	TransferVector(&par, &mat);
 
-	/* ******************** Step 6: Distribute the data ******************** */
+	/* ******************** Step 6: Computing local product ******************** */
+	MPI_Barrier(MPI_COMM_WORLD);
+	ComputeOutput(&par, &mat);
+	/* ******************** Step 7: Gather Data ******************** */
+	MPI_Barrier(MPI_COMM_WORLD);
+	GatherOutput(&par, &mat);
 
 	MPI_Barrier(MPI_COMM_WORLD);
+
 	if (par.id == 0) {
+		WriteOutput(&par, &mat);
 		Tstop(par.t0);
-		printf("======================================================\n");
+		printf("\n======================================================\n");
 		printf("Overall time         t0   (sec):\t\t%.8lf\n", par.t0);
 		printf("Total time taken     t1   (sec):\t\t%.8lf\n", par.t1);
 		printf("Time taken (step5&6) t2   (sec):\t\t%.8lf\n", par.t2);
@@ -223,6 +257,33 @@ int main(int argc, char *argv[]) {
 	MPI_Finalize();
 
 	return 0;
+}
+
+void Init(par_t *par, mat_t *mat) {
+	mat->nnz = -1;
+	mat->nrow = -1;
+	mat->colind = mat->rowind = mat->rowptr = mat->colptr = NULL;
+	mat->colval = mat->rowval = NULL;
+	par->finalout==NULL;
+}
+
+int TextLines(char *namestr) {
+	FILE *f;
+	if ((f = fopen(namestr, "r")) == NULL ) {
+		printf("Fail to open file %s\n", namestr);
+		exit(1);
+	}
+	char ch, prev = '\n';
+	int nlines = 0;
+	do {
+		ch = fgetc(f);
+		if (ch == '\n' && prev != '\n')
+			nlines++;
+		prev = ch;
+	} while (ch != EOF);
+	fclose(f);
+	printf("Number of lines in %s \t = %d\n", namestr, nlines);
+	return nlines;
 }
 
 int Step1root(par_t *par) {
@@ -381,22 +442,25 @@ int Step1other(par_t *par) {
 
 void CreateCSR(par_t *par, mat_t *mat) {
 	int k;
-	int showid = 1;
+	int showid = -1;
+
 	mat->nrow = par->localnrow;
 	mat->nnz = par->localnnz;
 	mat->ncol = par->nrow;
 
+	/* ********** How many entries are needed from other block ********** */
+	wccalloc(mat->blkbsize, int, par->np + 1, "Mat blkbsize");
+	/* ********** Mark whether an entry in b has been used ********** */
 	wccalloc(mat->marked, int, mat->ncol, "Zero init mat marked"); // Init to zero
 
+	/* ********** Allocate Space for CSR ********** */
 	wcalloc(mat->colind, int, mat->nnz, "Mat alloc colind");
 	wcalloc(mat->colval, double, mat->nnz, "Mat alloc colval");
 	wcalloc(mat->rowptr, int, mat->nrow + 1, "Mat alloc rowptr");
-
+	/* ********** Allocate Space for CSS ********** */
 	wcalloc(mat->rowind, int, mat->nnz, "Mat alloc rowind");
 	wcalloc(mat->rowval, double, mat->nnz, "Mat alloc rowval");
 	wcalloc(mat->colptr, int, mat->ncol + 1, "Mat alloc colptr");
-
-	wccalloc(mat->blkbsize, int, par->np, "Mat blkbsize");
 
 	int currentrow = 0;
 	mat->rowptr[currentrow] = 0;
@@ -411,10 +475,7 @@ void CreateCSR(par_t *par, mat_t *mat) {
 	mat->rowptr[mat->nrow] = mat->nnz;
 
 	if (par->id == showid) {
-		DPRINTF("mat->nrow=%d mat->nnz=%d, currentrow=%d\n",mat->nrow,mat->nnz,currentrow);
-//	wcdouble(mat->colval,mat->nnz,0,showid);
-//	wcint(mat->colind,mat->nnz,0,showid);
-//	wcint(mat->rowptr,mat->nrow+1,0,showid);
+		DPRINTF("ID %d mat.nrow=%d mat.nnz=%d, currentrow=%d\n",par->id,mat->nrow,mat->nnz,currentrow);
 	}
 
 }
@@ -422,7 +483,7 @@ void CreateCSR(par_t *par, mat_t *mat) {
 void IndexCSC(par_t *par, mat_t *mat) {
 	DPRINTF("INDEXING ID %d CSC\n",par->id);
 	int k;
-	int showid = 0;
+	int showid = -1;
 	if (((mat->colind) && (mat->colval) && (mat->rowptr)) == 0) {
 		fprintf(stderr, "The CSR form is not ready yet");
 	}
@@ -431,15 +492,15 @@ void IndexCSC(par_t *par, mat_t *mat) {
 		(mat->marked)[mat->colind[k]]++;
 	}
 
-	mat->colptr[0] = 0;
-
 	mat->bsize = 0;
 	int currentblk = 0;
 	for (k = 0; k < mat->ncol; ++k) {
+		/* ********** Calculate the exclusive prefix sum ********** */
 		if (k == 0)
 			mat->colptr[k] = 0;
 		else
-			mat->colptr[k] = mat->colptr[k - 1] + mat->marked[k];
+			mat->colptr[k] = mat->colptr[k - 1] + mat->marked[k - 1];
+		/* ********** Calculate the exclusive prefix sum ********** */
 		if (mat->marked[k] != 0) {
 			mat->bsize++;
 			while (k >= par->blkrowst[currentblk + 1]) {
@@ -455,71 +516,263 @@ void IndexCSC(par_t *par, mat_t *mat) {
 		s += mat->blkbsize[kk];
 	}
 
-	if (par->id == showid) {
-		wcint(mat->blkbsize, par->np, 0, showid);
-		wcint(par->blkrowst, par->np, 0, showid);
-		wcint(mat->colptr, mat->ncol + 1, 0, showid);
-		wcint(mat->marked, mat->ncol, 0, showid);DPRINTF("Current Blk %d, bsize %d, total blkbsize %d\n",currentblk,mat->bsize,s);
-	}
+	int *colacc;
+	wccalloc(colacc, int, mat->ncol, "colptr accummulator");
 
-	int *tempcolptr;
-	wcalloc(tempcolptr, int, mat->ncol + 1, "temp col ptr for translation");
-	memcpy(tempcolptr, mat->colptr, sizeof(int) * (mat->ncol + 1));
-	if (par->id == showid) {
-		wcint(mat->colptr, (mat->ncol + 1), 0, par->id);
-		wcint(tempcolptr, (mat->ncol + 1), 0, par->id);
-		wcint(mat->colind, (mat->nnz), 0, par->id);
-	}
-	int r, cpt, nnzcounter = 0;
+	int r, cpt, c, nnzcounter = 0;
 	for (r = 0; r < mat->nrow; ++r) {
 		for (cpt = mat->rowptr[r]; cpt < mat->rowptr[r + 1]; ++cpt) {
 			nnzcounter++;
-			if (par->id == showid) {
-				DPRINTF("%d \t",nnzcounter);DPRINTF("Current row %d \t",r);DPRINTF("Current col %d \n",mat->colind[cpt]);
-			}
-			mat->rowval[tempcolptr[mat->colind[cpt]]] = mat->colval[cpt];
-			mat->rowind[tempcolptr[mat->colind[cpt]]] = r;
-			tempcolptr[mat->colind[cpt]]++;
+			c = mat->colind[cpt];
+			mat->rowval[mat->colptr[c] + colacc[c]] = mat->colval[cpt];
+			mat->rowind[mat->colptr[c] + colacc[c]] = r;
+			colacc[c]++;
 		}
 	}
 
+	wcary(colacc, mat->marked, mat->ncol, par->id);
 	if (par->id == showid) {
-		DPRINTF("nnzcounter %d, last cpt %d last tempcolptr[mat->colind[cpt]] %d\n",
-				nnzcounter, cpt,tempcolptr[mat->colind[cpt-1]]);
-		wcint(tempcolptr, (mat->ncol + 1), 0, par->id);
-		wcint(mat->colptr, (mat->ncol + 1), 0, par->id);
-		wcint(mat->rowind, (mat->nnz), 0, par->id);
-		wcdouble(mat->rowval, (mat->nnz), 0, par->id);
-		wcdouble(mat->colval, (mat->nnz), 0, par->id);
-
+//		wcint(mat->colind, mat->nnz, 0, par->id);
+//		wcdouble(mat->colval, mat->nnz, 0, par->id);
+//		wcint(mat->rowptr, mat->nrow + 1, 0, par->id);
+//		wcint(mat->rowind, (mat->nnz), 0, par->id);
+//		wcdouble(mat->rowval, (mat->nnz), 0, par->id);
+//		wcint(mat->colptr, (mat->ncol + 1), 0, par->id);
 	}
+
+	wcfree(colacc, "accumulator for each column");
+}
+
+void DeterminNonlocalb(par_t *par, mat_t *mat) {
+	int k;
+	int showid = -1;
+	/* ********** How many entries are needed from other block ********** */
+	wccalloc(mat->nonlocalbst, int, par->np + 1, "Mat blkbsize");
+	/* ********** Allocate space for of index of all needed B */
+//	wcalloc(mat->b, double, mat->bsize, " alloc space for all needed b");
+	wcalloc(mat->needbidx, int, mat->bsize, ""); //in between
+
+	if (par->id == showid) {
+		wcint(mat->marked, mat->ncol, 0, par->id);
+	}
+
+	int nowptrb = 0;		// index of needbidx array
+	int blkcounter = 0;
+
+	/* ********** Iterator through all columns ********** */
+	for (k = 0; k < mat->ncol; ++k) {
+		/* ********** block starts here ********** */
+		if (k == par->blkrowst[blkcounter]) {
+			mat->nonlocalbst[blkcounter] = nowptrb;
+			++blkcounter;
+		}
+		/* ********** compressed needed b ********** */
+		if (mat->marked[k] != 0) {
+			mat->needbidx[nowptrb] = k;
+			++nowptrb;
+		}
+	}
+	mat->nonlocalbst[blkcounter] = mat->bsize;
+
+	if (par->id == showid) {
+		DPRINTF("curreentptrb %d bsize %d\nnp %d, blkcounter %d\n",nowptrb,mat->bsize,par->np,blkcounter);
+		wcint(mat->needbidx, mat->bsize, 0, par->id);
+		wcint(mat->nonlocalbst, par->np + 1, 0, par->id);
+		wcint(mat->blkbsize, par->np, 0, par->id);
+	}
+}
+
+void TransferVector(par_t *par, mat_t *mat) {
+	int showid = 0;
+	int k;
+	double *showdouble;
+	MPI_Status status;
+	if (par->id == showid) {
+		wcint(mat->marked, mat->ncol, 0, par->id);
+		wcint(mat->nonlocalbst, par->np + 1, 0, par->id);
+	}
+	/* ********** Allocate space for all needed B */
 	wcalloc(mat->b, double, mat->bsize, " alloc space for all needed b");
 
-}
-
-void Init(par_t *par, mat_t *mat) {
-	mat->nnz = -1;
-	mat->nrow = -1;
-	mat->colind = mat->rowind = mat->rowptr = mat->colptr = NULL;
-	mat->colval = mat->rowval = NULL;
-}
-
-int TextLines(char *namestr) {
-	FILE *f;
-	if ((f = fopen(namestr, "r")) == NULL ) {
-		printf("Fail to open file %s\n", namestr);
-		exit(1);
+	/* ********** Doing local copy */
+	int copyintobidx;
+	for (k = mat->nonlocalbst[par->id], copyintobidx = mat->nonlocalbst[par->id];
+			k < mat->nonlocalbst[par->id + 1]; ++k) {
+		if (par->id == showid)
+			DPRINTF("COPY IDX %d, VEC ID %d \n",copyintobidx,copyintobidx-par->blkrowst[par->id]);
+		mat->b[mat->needbidx[copyintobidx]] =
+				par->localvec[mat->needbidx[copyintobidx]
+						- par->blkrowst[par->id]];
+		copyintobidx++;
 	}
-	char ch, prev = '\n';
-	int nlines = 0;
-	do {
-		ch = fgetc(f);
-		if (ch == '\n' && prev != '\n')
-			nlines++;
-		prev = ch;
-	} while (ch != EOF);
-	fclose(f);
-	printf("Number of lines in %s \t = %d\n", namestr, nlines);
-	return nlines;
+
+	showdouble = &mat->b[mat->nonlocalbst[par->id]];
+	if (par->id == showid) {
+		DPRINTF("Local Copy Results %d\n",par->id);
+		wcdouble(showdouble,
+				mat->nonlocalbst[par->id + 1] - mat->nonlocalbst[par->id], 0,
+				par->id);
+	}
+
+	int idstep;
+	int outdst, insrc;
+	int sendbufsize, recvbufsize;
+	int *recvidxbuf;
+	double *sendvalbuf;
+	for (idstep = 0; idstep < par->np; ++idstep) {
+		outdst = ((par->id) + idstep) % (par->np);		// send get request to
+		insrc = ((par->id) + par->np - idstep) % (par->np); // recv get request from
+
+		/* ********** send to outdst, received from insrc ********** */
+		/* ********** Send number of indices ********** */
+		sendbufsize = mat->nonlocalbst[outdst + 1] - mat->nonlocalbst[outdst];
+		MPI_Send(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD);
+		/* ********** Receive number of indices ********** */
+		MPI_Recv(&recvbufsize, 1, MPI_INT, insrc, MPI_ANY_TAG, MPI_COMM_WORLD,
+				&status);
+
+		if (par->id == showid)
+			DPRINTF("\nSEND ID: %2d  OUTDST: %2d (size %d) \t INSRC %2d (size %d)\n",par->id,outdst,sendbufsize,insrc,recvbufsize);
+		wcalloc(recvidxbuf, int, recvbufsize, "recvbuf get requested index");
+
+		/* ********** Send indices list ********** */
+		MPI_Send(&mat->needbidx[mat->nonlocalbst[outdst]], sendbufsize, MPI_INT,
+				outdst, 0, MPI_COMM_WORLD);
+
+		/* ********** Receive indices list ********** */
+		MPI_Recv(recvidxbuf, recvbufsize, MPI_INT, insrc, 0, MPI_COMM_WORLD,
+				&status);
+
+//		if (par->id == showid)
+//			wcint(recvidxbuf, recvbufsize, 0, par->id);
+
+		/* ********** send to insrc, received from outdst ********** */
+		/* ********** Prepare value list for insrc********** */
+		wcalloc(sendvalbuf, double, recvbufsize, "send out requested values");
+		for (k = 0; k < recvbufsize; ++k) {
+			if (par->id == showid) {
+				DPRINTF("sendidx[%d]=%d, blkrst=%d\n",k,recvidxbuf[k],par->blkrowst[par->id]);
+			}
+			sendvalbuf[k] =
+					par->localvec[recvidxbuf[k] - par->blkrowst[par->id]];
+		}
+		if (par->id == showid) {
+			wcdouble(sendvalbuf, recvbufsize, 0, par->id);
+		}
+
+		/* ********** Send value list ********** */
+		MPI_Send(sendvalbuf, recvbufsize, MPI_DOUBLE, insrc, 0, MPI_COMM_WORLD);
+
+		/* ********** Receive value list ********** */
+		MPI_Recv(&mat->b[mat->nonlocalbst[outdst]], sendbufsize, MPI_DOUBLE,
+				outdst, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+
+		showdouble = &mat->b[mat->nonlocalbst[outdst]];
+
+		if (par->id == showid) {
+			DPRINTF("\nID: %d got values %d from ID %d\n",par->id,sendbufsize,outdst);
+			wcdouble(showdouble, sendbufsize, 0, par->id);
+		}
+//		MPI_Send(sendvalbuf, sendbufsize, MPI_DOUBLE, outdst, 0, MPI_COMM_WORLD);
+
+//		MPI_Recv(&mat->b[mat->nonlocalbst[insrc]], recvbufsize, MPI_DOUBLE, insrc, 0, MPI_COMM_WORLD,&status);
+
+		wcfree(recvidxbuf, "recv index buffer freed");
+		wcfree(sendvalbuf, "recv index buffer freed");
+	}
+
+	if (par->id == showid) {
+		DPRINTF("\n\n-----------------------------\n\n-----------------------------\n");
+		wcint(mat->marked, mat->ncol, 0, par->id);
+		wcint(mat->needbidx, mat->bsize, 0, par->id);
+		wcdouble(mat->b, mat->bsize, 0, par->id);
+	}
+
+}
+// int MPI_Send(void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
+
+// int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
+
+void ComputeOutput(par_t *par, mat_t *mat) {
+	int k;
+	int showid = 1;
+	wccalloc(mat->vout, double, mat->nrow, "block output");
+
+	if (par->id == showid) {
+//		wcdouble(mat->vout, mat->nrow, 0, par->id);
+		wcdouble(mat->b, mat->bsize, 0, par->id);
+		wcint(mat->needbidx, mat->bsize, 0, par->id); DPRINTF("ID: %d ncol %d\n",par->id,mat->ncol);
+	}
+
+	int needbptr = 0;
+	int r;
+	for (k = 0; k < mat->ncol; ++k) {
+
+		if (par->id == showid) {
+			DPRINTF("ID %d, k=%d, needbptr=%d, needbidx=%d\n",par->id,k,needbptr,mat->needbidx[needbptr]);
+		}
+		if (k < mat->needbidx[needbptr])
+			continue;
+
+		if (par->id == showid) {
+			DPRINTF("ID %d, colptr[k=%d]=%d, needbidx=%d colval=%5.2lf\n",par->id,k,mat->colptr[k],mat->needbidx[needbptr],mat->b[mat->needbidx[needbptr]]);
+		}
+
+		for (r = mat->colptr[k]; r < mat->colptr[k + 1]; ++r) {
+			mat->vout[mat->rowind[r]] += mat->b[mat->needbidx[needbptr]]
+					* mat->rowval[r];
+		}
+		needbptr++;
+
+	}
+
+	if (par->id == showid) {
+		DPRINTF("Final k %d\tlocal nrow %d\n",k,mat->nrow);
+		wcdouble(mat->vout, mat->nrow, 0, par->id);
+	}
+
 }
 
+void GatherOutput(par_t *par, mat_t *mat) {
+	int k;
+	MPI_Status status;
+	int showid=1;
+	if (par->id == 0) {
+		wcalloc(par->finalout, double, par->nrow, " final out");
+		memcpy(par->finalout, mat->vout,
+				sizeof(double) * (par->blkrowst[1] - par->blkrowst[0]));
+		for (k = 1; k < par->np; ++k) {
+			MPI_Recv(&par->finalout[par->blkrowst[k]],
+					(par->blkrowst[k + 1] - par->blkrowst[k]), MPI_DOUBLE, k,
+					MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+		}
+		wcdouble(par->finalout,par->nrow,0,par->id);
+	} else {
+		MPI_Send(mat->vout,mat->nrow, MPI_DOUBLE,0,0,MPI_COMM_WORLD);
+
+	}
+
+}
+
+// int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
+// int MPI_Send(void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
+
+void WriteOutput(par_t *par, mat_t *mat){
+	int k;
+	FILE *f;
+
+	printf("Output file name: %s",par->fout);
+	if (par->finalout==NULL){
+		fprintf(stderr,"Final out vector is NULL\n");
+	}
+
+	if ((f=fopen(par->fout,"w"))==NULL){
+		fprintf(stderr,"Fail to open output file: %s",par->fout);
+		return;
+	}
+
+	for (k=0;k<par->nrow;++k){
+		fprintf(f,"%lf\n",par->finalout[k]);
+	}
+	fclose(f);
+}
