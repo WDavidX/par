@@ -95,7 +95,7 @@ else{\
 #endif
 
 #ifdef DEBUG
-#define IDPASS(id,x) do{fprintf(stderr,"ID: %d   Pass line %d    %s\n",(id),__LINE__,x);}while(0)
+#define IDPASS(id,x) do{fprintf(stdout,"ID: %d   Pass line %d    %s\n",(id),__LINE__,x);}while(0)
 #else
 #define IDPASS(id,x) do{}while(0)
 #endif
@@ -113,7 +113,7 @@ typedef struct {
 	double t0;  // global timer
 	double t1, t2, t3;
 	/* ********** Per Node Basic Info ********** */
-
+	int PID;
 	char proc_name[MPI_MAX_PROCESSOR_NAME];
 	int namelength;
 	/* ********** File Info ********** */
@@ -197,11 +197,9 @@ int main(int argc, char *argv[]) {
 	MPI_Comm_rank(MPI_COMM_WORLD, &par.id); /* get current process id */
 	MPI_Comm_size(MPI_COMM_WORLD, &par.np); /* get number of processes */
 	MPI_Get_processor_name(par.proc_name, &par.namelength);
-
+	Init(&par, &mat);
 	/* ******************** Step 0: Set some init values ******************** */
-	mat.colval = NULL;
-	mat.colind = NULL;
-	mat.rowptr = NULL;
+
 
 	if (par.id == 0) {
 		if (argc == 4) {
@@ -222,10 +220,10 @@ int main(int argc, char *argv[]) {
 	};
 
 	if (par.id == 0) {
-		DPRINTF("Proc %d of %d, %s, fmat=%s, fvec=%s\n", par.id, par.np,
+		DPRINTF("PID %6d: Proc %2d of %d, %s, fmat=%s, fvec=%s\n", par.PID, par.id, par.np,
 				par.proc_name, par.fmat, par.fvec);
 	} else {
-		DPRINTF("Proc %d of %d, %s\n", par.id, par.np,par.proc_name);
+		DPRINTF("PID %6d: Proc %2d of %2d, %s\n", par.PID, par.id, par.np,par.proc_name);
 	}
 	MPI_Barrier(MPI_COMM_WORLD);
 
@@ -242,13 +240,13 @@ int main(int argc, char *argv[]) {
 	IndexCSC(&par, &mat);
 	DeterminNonlocalb(&par, &mat);
 	/* ******************** Step 3: Distribute the data ******************** */
-	MPI_Barrier(MPI_COMM_WORLD);
-	if (par.id == 0){
-		printf("\n\n");
-		wcint(par.blkrowst,par.np+1,0,par.id);
-		printf("\n\n");
-	}
-	MPI_Barrier(MPI_COMM_WORLD);
+//	MPI_Barrier(MPI_COMM_WORLD);
+//	if (par.id == 0) {
+//		printf("\n\n");
+//		wcint(par.blkrowst, par.np + 1, 0, par.id);
+//		printf("\n\n");
+//	}
+//	MPI_Barrier(MPI_COMM_WORLD);
 	/* ******************** Step 4: Distribute the data ******************** */
 
 	/* ******************** Step 5: Actual transfer the data ******************** */
@@ -288,11 +286,15 @@ int main(int argc, char *argv[]) {
 }
 
 void Init(par_t *par, mat_t *mat) {
+	par->PID=getpid();
 	mat->nnz = -1;
 	mat->nrow = -1;
 	mat->colind = mat->rowind = mat->rowptr = mat->colptr = NULL;
 	mat->colval = mat->rowval = NULL;
 	par->finalout = NULL;
+	mat->colval = NULL;
+	mat->colind = NULL;
+	mat->rowptr = NULL;
 }
 
 int TextLines(char *namestr) {
@@ -616,7 +618,7 @@ void DeterminNonlocalb(par_t *par, mat_t *mat) {
 }
 
 void TransferVector(par_t *par, mat_t *mat) {
-	int showid = 0;
+	int showid = 4;
 	int k;
 	double *showdouble;
 	MPI_Status status;
@@ -651,6 +653,7 @@ void TransferVector(par_t *par, mat_t *mat) {
 	/* ********** Doing cyclic remote copy ********** */
 	Bar(par->id);
 	IDPASS(par->id, "TransferVector  starts remote copy");
+	Bar(par->id);
 
 	int idstep;
 	int outdst, insrc;
@@ -658,36 +661,42 @@ void TransferVector(par_t *par, mat_t *mat) {
 	int *recvidxbuf;
 	double *sendvalbuf;
 	for (idstep = 0; idstep < par->np; ++idstep) {
+		Bar(par->id);
 		outdst = ((par->id) + idstep) % (par->np);		// send get request to
 		insrc = ((par->id) + par->np - idstep) % (par->np); // recv get request from
 
-		/* ********** send to outdst, received from insrc ********** */
+		/* ********** This is a must send to outdst, received from insrc ********** */
 		/* ********** Send number of indices ********** */
 		sendbufsize = mat->nonlocalbst[outdst + 1] - mat->nonlocalbst[outdst];
 		MPI_Send(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD);
 		/* ********** Receive number of indices ********** */
 		MPI_Recv(&recvbufsize, 1, MPI_INT, insrc, MPI_ANY_TAG, MPI_COMM_WORLD,
 				&status);
+		/* ********** Receive number of indices ********** */
 
 		if (par->id == showid)
 			DPRINTF("\nSEND ID: %2d  OUTDST: %2d (size %d) \t INSRC %2d (size %d)\n",par->id,outdst,sendbufsize,insrc,recvbufsize);
-		wcalloc(recvidxbuf, int, recvbufsize, "recvbuf get requested index");
+
+		if (recvbufsize != 0)
+			wcalloc(recvidxbuf, int, recvbufsize,
+					"recvbuf get requested index");
 
 		/* ********** Send indices list ********** */
-		MPI_Send(&mat->needbidx[mat->nonlocalbst[outdst]], sendbufsize, MPI_INT,
-				outdst, 0, MPI_COMM_WORLD);
+		if (sendbufsize != 0)
+			MPI_Send(&mat->needbidx[mat->nonlocalbst[outdst]], sendbufsize,
+					MPI_INT, outdst, 0, MPI_COMM_WORLD);
 
 		/* ********** Receive indices list ********** */
-		MPI_Recv(recvidxbuf, recvbufsize, MPI_INT, insrc, 0, MPI_COMM_WORLD,
-				&status);
-		IDPASS(par->id, "Done received indices list<++++++++");
-//		if (par->id == showid)
-//			wcint(recvidxbuf, recvbufsize, 0, par->id);
+		if (recvbufsize != 0)
+			MPI_Recv(recvidxbuf, recvbufsize, MPI_INT, insrc, 0, MPI_COMM_WORLD,
+					&status);
 
 		/* ********** send to insrc, received from outdst ********** */
 		/* ********** Prepare value list for insrc********** */
 
-		wcalloc(sendvalbuf, double, recvbufsize, "send out requested values");
+		if (recvbufsize != 0)
+			wcalloc(sendvalbuf, double, recvbufsize,
+					"send out requested values");
 		for (k = 0; k < recvbufsize; ++k) {
 			if (par->id == showid) {
 				DPRINTF("sendidx[%d]=%d, blkrst=%d\n",k,recvidxbuf[k],par->blkrowst[par->id]);
@@ -699,6 +708,7 @@ void TransferVector(par_t *par, mat_t *mat) {
 			wcdouble(sendvalbuf, recvbufsize, 0, par->id);
 		}
 
+		IDPASS(par->id, "Done prepare value list <++++++++");
 		/* ********** Send value list ********** */
 		MPI_Send(sendvalbuf, recvbufsize, MPI_DOUBLE, insrc, 0, MPI_COMM_WORLD);
 
@@ -712,12 +722,11 @@ void TransferVector(par_t *par, mat_t *mat) {
 			DPRINTF("\nID: %d got values %d from ID %d\n",par->id,sendbufsize,outdst);
 			wcdouble(showdouble, sendbufsize, 0, par->id);
 		}
-//		MPI_Send(sendvalbuf, sendbufsize, MPI_DOUBLE, outdst, 0, MPI_COMM_WORLD);
 
-//		MPI_Recv(&mat->b[mat->nonlocalbst[insrc]], recvbufsize, MPI_DOUBLE, insrc, 0, MPI_COMM_WORLD,&status);
-
-		wcfree(recvidxbuf, "recv index buffer freed");
-		wcfree(sendvalbuf, "recv index buffer freed");
+		if (recvbufsize != 0) {
+			wcfree(recvidxbuf, "recv index buffer freed");
+			wcfree(sendvalbuf, "recv index buffer freed");
+		}
 	}
 
 	if (par->id == showid) {
