@@ -25,7 +25,7 @@
 /* Helper functions */
 int TextLines(char *namestr);
 #define LTERM                   (void **) 0     /* List terminator for GKfree() */
-
+#define PATHPREFIX "./"
 /* Macros */
 #define Tclear(tmr) (tmr = 0.0)
 #define Tstart(tmr) (tmr -= MPI_Wtime())
@@ -100,6 +100,12 @@ else{\
 #define IDPASS(id,x) do{}while(0)
 #endif
 
+#ifdef DEBUG
+#define Bar(id) do{MPI_Barrier(MPI_COMM_WORLD);fprintf(stdout,"======>ID: %d   Reach barrier line %d\n",(id),__LINE__);}while(0)
+#else
+#define Bar(id) do{}while(0)
+#endif
+
 typedef struct {
 	/* ********** Timer Info ********** */
 	double t10; // reading files
@@ -111,7 +117,7 @@ typedef struct {
 	char proc_name[MPI_MAX_PROCESSOR_NAME];
 	int namelength;
 	/* ********** File Info ********** */
-	char *fmat, *fvec, *fout;
+	char *fmat, *fvec, *fout, *foutdir;
 	/* ********** Key Info ********** */
 	int np, id;
 	int nnz, nrow;
@@ -198,11 +204,21 @@ int main(int argc, char *argv[]) {
 	mat.rowptr = NULL;
 
 	if (par.id == 0) {
+		if (argc == 4) {
+			par.foutdir = argv[3];
+		} else {
+			if (argc > 4 || argc < 2) {
+				fprintf(stderr,
+						"Wrong number of argument. ./matrix.ij ./vector.vec");
+				exit(1);
+			} else
+				par.foutdir = NULL;
+		}
 		par.fmat = argv[1];
 		par.fvec = argv[2];
 		par.fout = NULL;
 	} else {
-		par.fmat = par.fvec = par.fout = NULL;
+		par.fmat = par.fvec = par.fout = par.foutdir = NULL;
 	};
 
 	if (par.id == 0) {
@@ -226,16 +242,28 @@ int main(int argc, char *argv[]) {
 	IndexCSC(&par, &mat);
 	DeterminNonlocalb(&par, &mat);
 	/* ******************** Step 3: Distribute the data ******************** */
-
+	MPI_Barrier(MPI_COMM_WORLD);
+	if (par.id == 0){
+		printf("\n\n");
+		wcint(par.blkrowst,par.np+1,0,par.id);
+		printf("\n\n");
+	}
+	MPI_Barrier(MPI_COMM_WORLD);
 	/* ******************** Step 4: Distribute the data ******************** */
 
 	/* ******************** Step 5: Actual transfer the data ******************** */
 	MPI_Barrier(MPI_COMM_WORLD);
+	Tstart(par.t2);
+	if (par.id == 0)
+		printf("Actual transfer starts.\n");
 	TransferVector(&par, &mat);
+	if (par.id == 0)
+		printf("Actual transfer finishes.\n");
 
 	/* ******************** Step 6: Computing local product ******************** */
 	MPI_Barrier(MPI_COMM_WORLD);
 	ComputeOutput(&par, &mat);
+	Tstop(par.t2);
 	/* ******************** Step 7: Gather Data ******************** */
 	MPI_Barrier(MPI_COMM_WORLD);
 	GatherOutput(&par, &mat);
@@ -243,7 +271,7 @@ int main(int argc, char *argv[]) {
 	MPI_Barrier(MPI_COMM_WORLD);
 
 	if (par.id == 0) {
-		WriteOutput(&par, &mat);
+//		WriteOutput(&par, &mat);
 		Tstop(par.t0);
 		printf("\n======================================================\n");
 		printf("Overall time         t0   (sec):\t\t%.8lf\n", par.t0);
@@ -264,7 +292,7 @@ void Init(par_t *par, mat_t *mat) {
 	mat->nrow = -1;
 	mat->colind = mat->rowind = mat->rowptr = mat->colptr = NULL;
 	mat->colval = mat->rowval = NULL;
-	par->finalout=NULL;
+	par->finalout = NULL;
 }
 
 int TextLines(char *namestr) {
@@ -298,9 +326,14 @@ int Step1root(par_t *par) {
 	all[1] = par->nrow;
 	MPI_Bcast(&all, 2, MPI_INT, par->id, MPI_COMM_WORLD);
 	par->fout = (char*) malloc(sizeof(char) * 256);
-	sprintf(par->fout, "./o%d.vec", par->nrow);
 	FILE *fA; // For matrix file
 	FILE *fb; // For vector file
+
+	if (par->foutdir == NULL )
+		sprintf(par->fout, "%so%d.vec", PATHPREFIX, par->nrow);
+	else
+		sprintf(par->fout, "%so%d.vec", par->foutdir, par->nrow);
+
 	if ((fA = fopen(par->fmat, "r")) == NULL
 			|| (fb = fopen(par->fvec, "r")) == NULL ) {
 		fprintf(stderr, "Fail to open files\n");
@@ -509,7 +542,7 @@ void IndexCSC(par_t *par, mat_t *mat) {
 			mat->blkbsize[currentblk]++;
 		}
 	}
-	mat->colptr[k] = mat->ncol;
+	mat->colptr[k] = mat->nnz;
 
 	int s = 0;
 	for (int kk = 0; kk < par->np; ++kk) {
@@ -594,7 +627,7 @@ void TransferVector(par_t *par, mat_t *mat) {
 	/* ********** Allocate space for all needed B */
 	wcalloc(mat->b, double, mat->bsize, " alloc space for all needed b");
 
-	/* ********** Doing local copy */
+	/* ********** Doing local copy ********** */
 	int copyintobidx;
 	for (k = mat->nonlocalbst[par->id], copyintobidx = mat->nonlocalbst[par->id];
 			k < mat->nonlocalbst[par->id + 1]; ++k) {
@@ -607,12 +640,17 @@ void TransferVector(par_t *par, mat_t *mat) {
 	}
 
 	showdouble = &mat->b[mat->nonlocalbst[par->id]];
+
 	if (par->id == showid) {
 		DPRINTF("Local Copy Results %d\n",par->id);
 		wcdouble(showdouble,
 				mat->nonlocalbst[par->id + 1] - mat->nonlocalbst[par->id], 0,
 				par->id);
 	}
+
+	/* ********** Doing cyclic remote copy ********** */
+	Bar(par->id);
+	IDPASS(par->id, "TransferVector  starts remote copy");
 
 	int idstep;
 	int outdst, insrc;
@@ -642,12 +680,13 @@ void TransferVector(par_t *par, mat_t *mat) {
 		/* ********** Receive indices list ********** */
 		MPI_Recv(recvidxbuf, recvbufsize, MPI_INT, insrc, 0, MPI_COMM_WORLD,
 				&status);
-
+		IDPASS(par->id, "Done received indices list<++++++++");
 //		if (par->id == showid)
 //			wcint(recvidxbuf, recvbufsize, 0, par->id);
 
 		/* ********** send to insrc, received from outdst ********** */
 		/* ********** Prepare value list for insrc********** */
+
 		wcalloc(sendvalbuf, double, recvbufsize, "send out requested values");
 		for (k = 0; k < recvbufsize; ++k) {
 			if (par->id == showid) {
@@ -695,39 +734,47 @@ void TransferVector(par_t *par, mat_t *mat) {
 
 void ComputeOutput(par_t *par, mat_t *mat) {
 	int k;
-	int showid = 1;
+	int showid = -1;
 	wccalloc(mat->vout, double, mat->nrow, "block output");
 
-	if (par->id == showid) {
-//		wcdouble(mat->vout, mat->nrow, 0, par->id);
-		wcdouble(mat->b, mat->bsize, 0, par->id);
-		wcint(mat->needbidx, mat->bsize, 0, par->id); DPRINTF("ID: %d ncol %d\n",par->id,mat->ncol);
-	}
+//	if (par->id == showid) {
+////		wcdouble(mat->vout, mat->nrow, 0, par->id);
+//		wcdouble(mat->b, mat->bsize, 0, par->id);
+//		wcint(mat->needbidx, mat->bsize, 0, par->id);DPRINTF("ID: %d ncol %d\n",par->id,mat->ncol);
+//
+//		wcdouble (mat->rowval,mat->nnz,0,par->id);
+//		wcint (mat->rowind,mat->nnz,0,par->id);
+//		wcint (mat->colptr,mat->ncol+1,0,par->id);
+//	}
 
 	int needbptr = 0;
 	int r;
 	for (k = 0; k < mat->ncol; ++k) {
 
-		if (par->id == showid) {
-			DPRINTF("ID %d, k=%d, needbptr=%d, needbidx=%d\n",par->id,k,needbptr,mat->needbidx[needbptr]);
-		}
-		if (k < mat->needbidx[needbptr])
+		if (mat->colptr[k + 1] == mat->colptr[k]) {
 			continue;
-
-		if (par->id == showid) {
-			DPRINTF("ID %d, colptr[k=%d]=%d, needbidx=%d colval=%5.2lf\n",par->id,k,mat->colptr[k],mat->needbidx[needbptr],mat->b[mat->needbidx[needbptr]]);
 		}
 
 		for (r = mat->colptr[k]; r < mat->colptr[k + 1]; ++r) {
-			mat->vout[mat->rowind[r]] += mat->b[mat->needbidx[needbptr]]
-					* mat->rowval[r];
+//			if (par->id == showid) {
+//				printf(
+//						"IDX: %2d, R=%d, C=%d, MAT=%5.2lf, Vec=%5.2lf, Vout[%d] %5.2lf, Added %5.2lf, Needbidx %d\n",
+//						r, mat->rowind[r], k, mat->rowval[r],
+////						mat->b[mat->needbidx[needbptr]],
+//						mat->b[needbptr],
+//						mat->rowind[r],
+//						mat->vout[mat->rowind[r]],
+//						(mat->b[needbptr] * mat->rowval[r]),mat->needbidx[needbptr]);
+//
+//			}
+			mat->vout[mat->rowind[r]] += (mat->b[needbptr] * mat->rowval[r]);
 		}
 		needbptr++;
 
 	}
 
 	if (par->id == showid) {
-		DPRINTF("Final k %d\tlocal nrow %d\n",k,mat->nrow);
+		DPRINTF("ID: %d, BLKNNZ %d, Final k (should be ncol) %d\tlocal nrow %d, local ncol %d\n",par->id,mat->nnz,k,mat->nrow,mat->ncol);
 		wcdouble(mat->vout, mat->nrow, 0, par->id);
 	}
 
@@ -736,7 +783,6 @@ void ComputeOutput(par_t *par, mat_t *mat) {
 void GatherOutput(par_t *par, mat_t *mat) {
 	int k;
 	MPI_Status status;
-	int showid=1;
 	if (par->id == 0) {
 		wcalloc(par->finalout, double, par->nrow, " final out");
 		memcpy(par->finalout, mat->vout,
@@ -746,33 +792,29 @@ void GatherOutput(par_t *par, mat_t *mat) {
 					(par->blkrowst[k + 1] - par->blkrowst[k]), MPI_DOUBLE, k,
 					MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 		}
-		wcdouble(par->finalout,par->nrow,0,par->id);
+		wcdouble(par->finalout, par->nrow, 0, par->id);
 	} else {
-		MPI_Send(mat->vout,mat->nrow, MPI_DOUBLE,0,0,MPI_COMM_WORLD);
-
+		MPI_Send(mat->vout, mat->nrow, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
 	}
 
 }
 
-// int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
-// int MPI_Send(void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
-
-void WriteOutput(par_t *par, mat_t *mat){
+void WriteOutput(par_t *par, mat_t *mat) {
 	int k;
 	FILE *f;
 
-	printf("Output file name: %s",par->fout);
-	if (par->finalout==NULL){
-		fprintf(stderr,"Final out vector is NULL\n");
+	printf("Output file name: %s", par->fout);
+	if (par->finalout == NULL ) {
+		fprintf(stderr, "Final out vector is NULL\n");
 	}
 
-	if ((f=fopen(par->fout,"w"))==NULL){
-		fprintf(stderr,"Fail to open output file: %s",par->fout);
+	if ((f = fopen(par->fout, "w")) == NULL ) {
+		fprintf(stderr, "Fail to open output file: %s", par->fout);
 		return;
 	}
 
-	for (k=0;k<par->nrow;++k){
-		fprintf(f,"%lf\n",par->finalout[k]);
+	for (k = 0; k < par->nrow; ++k) {
+		fprintf(f, "%lf\n", par->finalout[k]);
 	}
 	fclose(f);
 }
