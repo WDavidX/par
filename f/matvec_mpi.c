@@ -264,7 +264,7 @@ void Init(par_t *par, mat_t *mat) {
 	mat->nrow = -1;
 	mat->colind = mat->rowind = mat->rowptr = mat->colptr = NULL;
 	mat->colval = mat->rowval = NULL;
-	par->finalout==NULL;
+	par->finalout=NULL;
 }
 
 int TextLines(char *namestr) {
