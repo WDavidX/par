@@ -248,13 +248,13 @@ int main(int argc, char *argv[]) {
 		WriteOutput(&par, &mat);
 		Tstop(par.t0);
 		printf("\n======================================================\n");
-		printf("Overall time         t0   (sec):\t\t%.8lf\n", par.t0);
-		printf("Total time taken     t1   (sec):\t\t%.8lf\n", par.t1);
-		printf("Time taken (step5&6) t2   (sec):\t\t%.8lf\n", par.t2);
-		printf("Time taken (fileio) t10   (sec):\t\t%.8lf\n", par.t10);
-		printf("Transfer needed vec t11   (sec):\t\t%.8lf\n", par.t11);
-		printf("Local computation   t13   (sec):\t\t%.8lf\n", par.t13);
-		printf("Write output file   t12   (sec):\t\t%.8lf\n", par.t12);
+		printf("Overall time         t0   (sec):\t%.8lf\n", par.t0);
+		printf("Total time taken     t1   (sec):$\t%.8lf\n", par.t1);
+		printf("Time taken (step5&6) t2   (sec):$\t%.8lf\n", par.t2);
+		printf("Time taken (fileio) t10   (sec):\t%.8lf\n", par.t10);
+		printf("Transfer needed vec t11   (sec):\t%.8lf\n", par.t11);
+		printf("Local computation   t13   (sec):\t%.8lf\n", par.t13);
+		printf("Write output file   t12   (sec):\t%.8lf\n", par.t12);
 		printf("======================================================\n");
 	}
 	FinalFreeMemory(&par, &mat);
