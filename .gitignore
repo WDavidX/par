@@ -23,3 +23,9 @@
 
 # data file
 *.mydat
+
+
+# hw4
+m*.ij
+m*.vec
+o*.vec

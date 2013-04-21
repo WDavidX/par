@@ -268,7 +268,7 @@ int main(int argc, char *argv[]) {
 	MPI_Barrier(MPI_COMM_WORLD);
 
 	if (par.id == 0) {
-//		WriteOutput(&par, &mat);
+		WriteOutput(&par, &mat);
 		Tstop(par.t0);
 		printf("\n======================================================\n");
 		printf("Overall time         t0   (sec):\t\t%.8lf\n", par.t0);
@@ -515,7 +515,7 @@ void CreateCSR(par_t *par, mat_t *mat) {
 }
 
 void IndexCSC(par_t *par, mat_t *mat) {
-	DPRINTF("INDEXING ID %d CSC\n",par->id);
+	DPRINTF("INDEXING ID %2d CSC\n",par->id);
 	int k;
 	int showid = -1;
 	if (((mat->colind) && (mat->colval) && (mat->rowptr)) == 0) {
@@ -617,7 +617,7 @@ void DeterminNonlocalb(par_t *par, mat_t *mat) {
 }
 
 void TransferVector(par_t *par, mat_t *mat) {
-	MPI_Request sendreq;
+//	MPI_Request sendreq=NULL;
 	int showid = 4;
 	int k;
 	double *showdouble;
@@ -649,17 +649,17 @@ void TransferVector(par_t *par, mat_t *mat) {
 		/* ********** This is a must send to outdst, received from insrc ********** */
 		/* ********** Send number of indices ********** */
 		sendbufsize = mat->nonlocalbst[outdst + 1] - mat->nonlocalbst[outdst];
-		printf("ID %2d, partener %2d, sendbufsize %d \n",par->id,outdst,sendbufsize);
-//		MPI_Send(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD);
-		MPI_Isend(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD,&sendreq);
+//		printf("ID %2d, partner %2d, sendbufsize %d \n",par->id,outdst,sendbufsize);
+		MPI_Send(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD);
+//		MPI_Isend(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD,&sendreq);
 		/* ********** Receive number of indices ********** */
 		MPI_Recv(&recvbufsize, 1, MPI_INT, insrc, MPI_ANY_TAG, MPI_COMM_WORLD,
 				&status);
 		/* ********** Receive number of indices ********** */
-		Bar(par->id);
+//		Bar(par->id);
 
-		if (par->id == showid)
-			DPRINTF("\nSEND ID: %2d  OUTDST: %2d (size %d) \t INSRC %2d (size %d)\n",par->id,outdst,sendbufsize,insrc,recvbufsize);
+//		if (par->id == showid)
+//			DPRINTF("\nSEND ID: %2d  OUTDST: %2d (size %d) \t INSRC %2d (size %d)\n",par->id,outdst,sendbufsize,insrc,recvbufsize);
 
 		if (recvbufsize != 0) {
 			wcalloc(recvidxbuf, int, recvbufsize,
@@ -682,15 +682,15 @@ void TransferVector(par_t *par, mat_t *mat) {
 		/* ********** Prepare value list for insrc********** */
 
 		for (k = 0; k < recvbufsize; ++k) {
-			if (par->id == showid)
-				DPRINTF("sendidx[%d]=%d, blkrst=%d\n",k,recvidxbuf[k],par->blkrowst[par->id]);
+//			if (par->id == showid)
+//				DPRINTF("sendidx[%d]=%d, blkrst=%d\n",k,recvidxbuf[k],par->blkrowst[par->id]);
 			sendvalbuf[k] =
 					par->localvec[recvidxbuf[k] - par->blkrowst[par->id]];
 		}
-		if (par->id == showid) {
-			DPRINTF("ID: %2d Output %d Value List from %d to %d ",par->id,recvbufsize,par->id,insrc);
-			wcdouble(sendvalbuf, recvbufsize, 0, par->id);
-		}
+//		if (par->id == showid) {
+//			DPRINTF("ID: %2d Output %d Value List from %d to %d ",par->id,recvbufsize,par->id,insrc);
+//			wcdouble(sendvalbuf, recvbufsize, 0, par->id);
+//		}
 
 //		IDPASS(par->id, "Done prepare value list <++++++++");
 		/* ********** Send value list ********** */
@@ -702,10 +702,10 @@ void TransferVector(par_t *par, mat_t *mat) {
 
 		showdouble = &mat->b[mat->nonlocalbst[outdst]];
 
-		if (par->id == showid) {
-			DPRINTF("\nID: %d got values %d from ID %d\n",par->id,sendbufsize,outdst);
-			wcdouble(showdouble, sendbufsize, 0, par->id);
-		}
+//		if (par->id == showid) {
+//			DPRINTF("\nID: %d got values %d from ID %d\n",par->id,sendbufsize,outdst);
+//			wcdouble(showdouble, sendbufsize, 0, par->id);
+//		}
 
 		if (recvbufsize != 0) {
 			wcfree(recvidxbuf, "recv index buffer freed");
@@ -713,12 +713,12 @@ void TransferVector(par_t *par, mat_t *mat) {
 		}
 	}
 
-	if (par->id == showid) {
-		DPRINTF("\n\n-----------------------------\n\n-----------------------------\n");
-		wcint(mat->marked, mat->ncol, 0, par->id);
-		wcint(mat->needbidx, mat->bsize, 0, par->id);
-		wcdouble(mat->b, mat->bsize, 0, par->id);
-	}
+//	if (par->id == showid) {
+//		DPRINTF("\n\n-----------------------------\n\n-----------------------------\n");
+//		wcint(mat->marked, mat->ncol, 0, par->id);
+//		wcint(mat->needbidx, mat->bsize, 0, par->id);
+//		wcdouble(mat->b, mat->bsize, 0, par->id);
+//	}
 
 }
 
@@ -764,10 +764,10 @@ void ComputeOutput(par_t *par, mat_t *mat) {
 
 	}
 
-	if (par->id == showid) {
-		DPRINTF("ID: %d, BLKNNZ %d, Final k (should be ncol) %d\tlocal nrow %d, local ncol %d\n",par->id,mat->nnz,k,mat->nrow,mat->ncol);
-		wcdouble(mat->vout, mat->nrow, 0, par->id);
-	}
+//	if (par->id == showid) {
+//		DPRINTF("ID: %d, BLKNNZ %d, Final k (should be ncol) %d\tlocal nrow %d, local ncol %d\n",par->id,mat->nnz,k,mat->nrow,mat->ncol);
+//		wcdouble(mat->vout, mat->nrow, 0, par->id);
+//	}
 
 }
 
