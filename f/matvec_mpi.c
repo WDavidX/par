@@ -26,6 +26,7 @@
 int TextLines(char *namestr);
 #define LTERM                   (void **) 0     /* List terminator for GKfree() */
 #define PATHPREFIX "./"
+#define MYDPBUFSIZE 200000
 /* Macros */
 #define Tclear(tmr) (tmr = 0.0)
 #define Tstart(tmr) (tmr -= MPI_Wtime())
@@ -117,10 +118,12 @@ typedef struct {
 	double t1;  // report step 2~6 time
 	double t2;  // report step 5&6 time
 	double t3;
+
 	/* ********** Per Node Basic Info ********** */
 	int PID;
 	char proc_name[MPI_MAX_PROCESSOR_NAME];
 	int namelength;
+	int mybufsize;
 	/* ********** File Info ********** */
 	char *fmat, *fvec, *fout, *foutdir;
 	/* ********** Key Info ********** */
@@ -169,6 +172,7 @@ typedef struct {
 /* ********** Global Varibles********** */
 par_t par;
 mat_t mat;
+void* mybuf;
 int all[2] = { -1, -1 };
 
 int Step1root(par_t *par);
@@ -184,17 +188,22 @@ void GatherOutput(par_t *par, mat_t *mat);
 void WriteOutput(par_t *par, mat_t *mat);
 void FinalFreeMemory(par_t *par, mat_t *mat);
 
+void AdjustBuffer(par_t *par);
+
 int main(int argc, char *argv[]) {
 	/* ******************** Step 0: Get Host Names and IDs ******************** */
 	MPI_Init(&argc, &argv); /* starts MPI */
+
 	par.t0 = 0;
 	Tstart(par.t0);
 	MPI_Comm_rank(MPI_COMM_WORLD, &par.id); /* get current process id */
 	MPI_Comm_size(MPI_COMM_WORLD, &par.np); /* get number of processes */
 	MPI_Get_processor_name(par.proc_name, &par.namelength);
+
 	Init(&par, &mat);
 	/* ******************** Step 0: Set some init values ******************** */
 	if (par.id == 0) {
+
 		if (argc == 4) {
 			par.foutdir = argv[3];
 		} else {
@@ -224,7 +233,10 @@ int main(int argc, char *argv[]) {
 	} else {
 		Step1other(&par);
 	}
+	AdjustBuffer(&par);
+
 	CreateCSR(&par, &mat); // here, all nodes have local mat and vec in CSR form
+	MPI_Barrier(MPI_COMM_WORLD);
 	Tstart(par.t1);
 	/* ******************** Step 2: Analyze non-zero entry******************** */
 	IndexCSC(&par, &mat);
@@ -233,7 +245,7 @@ int main(int argc, char *argv[]) {
 
 	/* ******************** Step 4: Figure out which process needs which ******************** */
 	/* ******************** Step 5: Actual transfer the data ******************** */
-	if (par.id==0)
+	if (par.id == 0)
 		printf("Starting transferring the vector b at ID=0\n");
 	Tstart(par.t2);
 	Tstart(par.t11);
@@ -241,8 +253,8 @@ int main(int argc, char *argv[]) {
 	Tstop(par.t11);
 	/* ******************** Step 6: Computing local product ******************** */
 	Tstart(par.t13);
-	if (par.id==0)
-			printf("Starting computation at ID=0\n");
+	if (par.id == 0)
+		printf("Starting computation at ID=0\n");
 	ComputeOutput(&par, &mat);
 	Tstop(par.t13);
 	Tstop(par.t2);
@@ -552,7 +564,7 @@ void DeterminNonlocalb(par_t *par, mat_t *mat) {
 void TransferVector(par_t *par, mat_t *mat) {
 	int k;
 	MPI_Status status;
-	MPI_Request sendreq;
+//	MPI_Request sendreq;
 	/* ********** Allocate space for all needed B in space O(bsize)=O(n/p) ********** */
 	wcalloc(mat->b, double, mat->bsize, " alloc space for all needed b");
 
@@ -569,19 +581,21 @@ void TransferVector(par_t *par, mat_t *mat) {
 	int *recvidxbuf = NULL;
 	double *sendvalbuf = NULL;
 
+//	DPRINTF("ID: %d: Done with local copy. Entering remote transferring.\n",par->id);
 	for (idstep = 1; idstep < par->np; ++idstep) {
 		outdst = ((par->id) + idstep) % (par->np);		// send get request to
 		insrc = ((par->id) + par->np - idstep) % (par->np); // recv get request from
 		/* ********** This is a must send to outdst, received from insrc ********** */
 		/* ********** Send number of indices ********** */
 		sendbufsize = mat->nonlocalbst[outdst + 1] - mat->nonlocalbst[outdst];
-//		MPI_Send(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD);
-		MPI_Isend(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD,&sendreq);
+		MPI_Send(&sendbufsize, 1, MPI_INT, outdst, 11, MPI_COMM_WORLD);
+//		MPI_Bsend(&sendbufsize, 1, MPI_INT, outdst, 11, MPI_COMM_WORLD);
 
+//		MPI_Isend(&sendbufsize, 1, MPI_INT, outdst, 11, MPI_COMM_WORLD,
+//				&sendreq);
+//		DPRINTF("ID: %d: Done send bufsize.\n",par->id);
 		/* ********** Receive number of indices ********** */
-		MPI_Recv(&recvbufsize, 1, MPI_INT, insrc, MPI_ANY_TAG, MPI_COMM_WORLD,
-				&status);
-//		DPRINTF("ID: %d: Done recv bufsize.\n",par->id);
+		MPI_Recv(&recvbufsize, 1, MPI_INT, insrc, 11, MPI_COMM_WORLD, &status);
 		/* ********** Receive number of indices ********** */
 		if (recvbufsize != 0) {
 			wcalloc(recvidxbuf, int, recvbufsize,
@@ -590,19 +604,20 @@ void TransferVector(par_t *par, mat_t *mat) {
 					"send out requested values");
 		}
 
-
+//		DPRINTF("ID: %d: Done receive bufsize.\n",par->id);
 		/* ********** Send indices list ********** */
-//		if (sendbufsize != 0)
-//			MPI_Send(&mat->needbidx[mat->nonlocalbst[outdst]], sendbufsize,
-//					MPI_INT, outdst, 0, MPI_COMM_WORLD);
-		if (sendbufsize != 0)
-			MPI_Isend(&mat->needbidx[mat->nonlocalbst[outdst]], sendbufsize,
-					MPI_INT, outdst, 0, MPI_COMM_WORLD,&sendreq);
-
+		if (sendbufsize != 0) {
+//			DPRINTF("ID %d sendbufsize %d\n",par->id,sendbufsize);
+			MPI_Bsend(&mat->needbidx[mat->nonlocalbst[outdst]], sendbufsize,
+					MPI_INT, outdst, 12, MPI_COMM_WORLD);
+//			MPI_Isend(&mat->needbidx[mat->nonlocalbst[outdst]], sendbufsize,
+//					MPI_INT, outdst, 12, MPI_COMM_WORLD, &sendreq);
+		}
+//		DPRINTF("ID: %d: Done send indice list.\n",par->id);
 		/* ********** Receive indices list ********** */
 		if (recvbufsize != 0)
-			MPI_Recv(recvidxbuf, recvbufsize, MPI_INT, insrc, 0, MPI_COMM_WORLD,
-					&status);
+			MPI_Recv(recvidxbuf, recvbufsize, MPI_INT, insrc, 12,
+					MPI_COMM_WORLD, &status);
 //		DPRINTF("ID: %d: Done recv indices list.\n",par->id);
 		/* ********** send to insrc, received from outdst ********** */
 		/* ********** Prepare value list for insrc********** */
@@ -613,12 +628,14 @@ void TransferVector(par_t *par, mat_t *mat) {
 		}
 
 		/* ********** Send value list ********** */
-//		MPI_Send(sendvalbuf, recvbufsize, MPI_DOUBLE, insrc, 0, MPI_COMM_WORLD);
-		MPI_Isend(sendvalbuf, recvbufsize, MPI_DOUBLE, insrc, 0, MPI_COMM_WORLD,&sendreq);
+		MPI_Bsend(sendvalbuf, recvbufsize, MPI_DOUBLE, insrc, 13,
+				MPI_COMM_WORLD);
+//		MPI_Isend(sendvalbuf, recvbufsize, MPI_DOUBLE, insrc, 13,
+//				MPI_COMM_WORLD, &sendreq);
 
 		/* ********** Receive value list ********** */
 		MPI_Recv(&mat->b[mat->nonlocalbst[outdst]], sendbufsize, MPI_DOUBLE,
-				outdst, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+				outdst, 13, MPI_COMM_WORLD, &status);
 
 		/* ********** Clear the send and received buffers if not empty ********** */
 		if (recvbufsize != 0) {
@@ -700,6 +717,22 @@ void FinalFreeMemory(par_t *par, mat_t *mat) {
 	wcfree(mat->needbidx, "");
 	wcfree(mat->nonlocalbst, "");
 	wcfree(mat->vout, "");
+
+	MPI_Buffer_detach(&mybuf,&(par->mybufsize));
+	wcfree(mybuf,"buffer for MPI_Bsend");
+}
+
+void AdjustBuffer(par_t *par) {
+	par->mybufsize = ((par->nrow / par->np + par->np) * sizeof(MPI_DOUBLE)
+			+ MPI_BSEND_OVERHEAD) * 2;
+//	par->mybufsize =(40000000/1)*8+MPI_BSEND_OVERHEAD;
+	mybuf = malloc(par->mybufsize);
+	if (mybuf == NULL ) {
+		fprintf(stderr, "ID: %d Bsend buffer failure.\n", par->id);
+		exit(1);
+	}
+
+	MPI_Buffer_attach(mybuf, par->mybufsize);
 }
 
 //1. One process reads the file and distributes the data to the other processes using a 1D decomposition along the rows. The decomposition for A and b should be the same. 
