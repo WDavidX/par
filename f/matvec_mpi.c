@@ -33,7 +33,7 @@ int TextLines(char *namestr);
 #define Tget(tmr)   (tmr)
 
 #ifdef DEBUG
-#define DPRINTF(fmt, args...)    fprintf(stdout, fmt, ## args)
+#define DPRINTF(fmt, args...)    fprintf(stderr, fmt, ## args)
 #else
 #define DPRINTF(fmt, args...)    /* Don't do anything in release builds */
 #endif
@@ -225,7 +225,7 @@ int main(int argc, char *argv[]) {
 		Step1other(&par);
 	}
 	CreateCSR(&par, &mat); // here, all nodes have local mat and vec in CSR form
-	MPI_Barrier(MPI_COMM_WORLD);
+	Tstart(par.t1);
 	/* ******************** Step 2: Analyze non-zero entry******************** */
 	IndexCSC(&par, &mat);
 	/* ******************** Step 3: Analyze non-zero entry******************** */
@@ -233,20 +233,26 @@ int main(int argc, char *argv[]) {
 
 	/* ******************** Step 4: Figure out which process needs which ******************** */
 	/* ******************** Step 5: Actual transfer the data ******************** */
+	if (par.id==0)
+		printf("Starting transferring the vector b at ID=0\n");
 	Tstart(par.t2);
 	Tstart(par.t11);
 	TransferVector(&par, &mat);
 	Tstop(par.t11);
 	/* ******************** Step 6: Computing local product ******************** */
 	Tstart(par.t13);
+	if (par.id==0)
+			printf("Starting computation at ID=0\n");
 	ComputeOutput(&par, &mat);
 	Tstop(par.t13);
 	Tstop(par.t2);
+	Tstop(par.t1);
 	/* ******************** Step 7: Gather Data ******************** */
 	GatherOutput(&par, &mat);
 	if (par.id == 0) {
 		WriteOutput(&par, &mat);
 		Tstop(par.t0);
+
 		printf("\n======================================================\n");
 		printf("Overall time         t0   (sec):\t%.8lf\n", par.t0);
 		printf("Total time taken     t1   (sec):$\t%.8lf\n", par.t1);
@@ -546,6 +552,7 @@ void DeterminNonlocalb(par_t *par, mat_t *mat) {
 void TransferVector(par_t *par, mat_t *mat) {
 	int k;
 	MPI_Status status;
+	MPI_Request sendreq;
 	/* ********** Allocate space for all needed B in space O(bsize)=O(n/p) ********** */
 	wcalloc(mat->b, double, mat->bsize, " alloc space for all needed b");
 
@@ -561,18 +568,20 @@ void TransferVector(par_t *par, mat_t *mat) {
 	int sendbufsize = 0, recvbufsize = 0;
 	int *recvidxbuf = NULL;
 	double *sendvalbuf = NULL;
-	for (idstep = 1; idstep < par->np; ++idstep) {
 
+	for (idstep = 1; idstep < par->np; ++idstep) {
 		outdst = ((par->id) + idstep) % (par->np);		// send get request to
 		insrc = ((par->id) + par->np - idstep) % (par->np); // recv get request from
 		/* ********** This is a must send to outdst, received from insrc ********** */
 		/* ********** Send number of indices ********** */
 		sendbufsize = mat->nonlocalbst[outdst + 1] - mat->nonlocalbst[outdst];
-		MPI_Send(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD);
+//		MPI_Send(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD);
+		MPI_Isend(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD,&sendreq);
+
 		/* ********** Receive number of indices ********** */
 		MPI_Recv(&recvbufsize, 1, MPI_INT, insrc, MPI_ANY_TAG, MPI_COMM_WORLD,
 				&status);
-
+//		DPRINTF("ID: %d: Done recv bufsize.\n",par->id);
 		/* ********** Receive number of indices ********** */
 		if (recvbufsize != 0) {
 			wcalloc(recvidxbuf, int, recvbufsize,
@@ -581,16 +590,20 @@ void TransferVector(par_t *par, mat_t *mat) {
 					"send out requested values");
 		}
 
+
 		/* ********** Send indices list ********** */
+//		if (sendbufsize != 0)
+//			MPI_Send(&mat->needbidx[mat->nonlocalbst[outdst]], sendbufsize,
+//					MPI_INT, outdst, 0, MPI_COMM_WORLD);
 		if (sendbufsize != 0)
-			MPI_Send(&mat->needbidx[mat->nonlocalbst[outdst]], sendbufsize,
-					MPI_INT, outdst, 0, MPI_COMM_WORLD);
+			MPI_Isend(&mat->needbidx[mat->nonlocalbst[outdst]], sendbufsize,
+					MPI_INT, outdst, 0, MPI_COMM_WORLD,&sendreq);
 
 		/* ********** Receive indices list ********** */
 		if (recvbufsize != 0)
 			MPI_Recv(recvidxbuf, recvbufsize, MPI_INT, insrc, 0, MPI_COMM_WORLD,
 					&status);
-
+//		DPRINTF("ID: %d: Done recv indices list.\n",par->id);
 		/* ********** send to insrc, received from outdst ********** */
 		/* ********** Prepare value list for insrc********** */
 
@@ -600,7 +613,8 @@ void TransferVector(par_t *par, mat_t *mat) {
 		}
 
 		/* ********** Send value list ********** */
-		MPI_Send(sendvalbuf, recvbufsize, MPI_DOUBLE, insrc, 0, MPI_COMM_WORLD);
+//		MPI_Send(sendvalbuf, recvbufsize, MPI_DOUBLE, insrc, 0, MPI_COMM_WORLD);
+		MPI_Isend(sendvalbuf, recvbufsize, MPI_DOUBLE, insrc, 0, MPI_COMM_WORLD,&sendreq);
 
 		/* ********** Receive value list ********** */
 		MPI_Recv(&mat->b[mat->nonlocalbst[outdst]], sendbufsize, MPI_DOUBLE,

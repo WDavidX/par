@@ -3,7 +3,7 @@ clear all;clc; format short
 c=clock;
 disp( sprintf( '%d-%d-%d %2d:%2d:%2d',c(1),c(2),c(3),c(4),c(5),c(6)))
 tic
-matname='m10000-A.ij';vecname='m10000.vec';
+matname='m10000-B.ij';vecname='m10000.vec';
 wcmat=load(matname);wcvec=load(vecname);
 nnz=length(wcmat);
 n=length(wcvec);
