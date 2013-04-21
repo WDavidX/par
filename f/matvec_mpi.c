@@ -101,7 +101,7 @@ else{\
 #endif
 
 #ifdef DEBUG
-#define Bar(id) do{MPI_Barrier(MPI_COMM_WORLD);fprintf(stdout,"======>ID: %d   Reach barrier line %d\n",(id),__LINE__);}while(0)
+#define Bar(id) do{MPI_Barrier(MPI_COMM_WORLD);fprintf(stdout,"======>ID: %d   Reach barrier line %d\n",(id),__LINE__);MPI_Barrier(MPI_COMM_WORLD);}while(0)
 #else
 #define Bar(id) do{}while(0)
 #endif
@@ -200,7 +200,6 @@ int main(int argc, char *argv[]) {
 	Init(&par, &mat);
 	/* ******************** Step 0: Set some init values ******************** */
 
-
 	if (par.id == 0) {
 		if (argc == 4) {
 			par.foutdir = argv[3];
@@ -286,7 +285,7 @@ int main(int argc, char *argv[]) {
 }
 
 void Init(par_t *par, mat_t *mat) {
-	par->PID=getpid();
+	par->PID = getpid();
 	mat->nnz = -1;
 	mat->nrow = -1;
 	mat->colind = mat->rowind = mat->rowptr = mat->colptr = NULL;
@@ -618,68 +617,56 @@ void DeterminNonlocalb(par_t *par, mat_t *mat) {
 }
 
 void TransferVector(par_t *par, mat_t *mat) {
+	MPI_Request sendreq;
 	int showid = 4;
 	int k;
 	double *showdouble;
 	MPI_Status status;
-	if (par->id == showid) {
-		wcint(mat->marked, mat->ncol, 0, par->id);
-		wcint(mat->nonlocalbst, par->np + 1, 0, par->id);
-	}
+//	if (par->id == showid) {
+//		wcint(mat->marked, mat->ncol, 0, par->id);
+//		wcint(mat->nonlocalbst, par->np + 1, 0, par->id);
+//	}
 	/* ********** Allocate space for all needed B */
 	wcalloc(mat->b, double, mat->bsize, " alloc space for all needed b");
 
 	/* ********** Doing local copy ********** */
-	int copyintobidx;
-	for (k = mat->nonlocalbst[par->id], copyintobidx = mat->nonlocalbst[par->id];
-			k < mat->nonlocalbst[par->id + 1]; ++k) {
-		if (par->id == showid)
-			DPRINTF("COPY IDX %d, VEC ID %d \n",copyintobidx,copyintobidx-par->blkrowst[par->id]);
-		mat->b[mat->needbidx[copyintobidx]] =
-				par->localvec[mat->needbidx[copyintobidx]
-						- par->blkrowst[par->id]];
-		copyintobidx++;
-	}
 
-	showdouble = &mat->b[mat->nonlocalbst[par->id]];
-
-	if (par->id == showid) {
-		DPRINTF("Local Copy Results %d\n",par->id);
-		wcdouble(showdouble,
-				mat->nonlocalbst[par->id + 1] - mat->nonlocalbst[par->id], 0,
-				par->id);
+	for (k=mat->nonlocalbst[par->id];k<mat->nonlocalbst[par->id+1];++k){
+		mat->b[k]=par->localvec[mat->needbidx[k]-par->blkrowst[par->id]];
 	}
 
 	/* ********** Doing cyclic remote copy ********** */
-	Bar(par->id);
-	IDPASS(par->id, "TransferVector  starts remote copy");
-	Bar(par->id);
 
 	int idstep;
 	int outdst, insrc;
-	int sendbufsize, recvbufsize;
-	int *recvidxbuf;
-	double *sendvalbuf;
-	for (idstep = 0; idstep < par->np; ++idstep) {
-		Bar(par->id);
+	int sendbufsize=0, recvbufsize=0;
+	int *recvidxbuf = NULL;
+	double *sendvalbuf = NULL;
+	for (idstep = 1; idstep < par->np; ++idstep) {
+
 		outdst = ((par->id) + idstep) % (par->np);		// send get request to
 		insrc = ((par->id) + par->np - idstep) % (par->np); // recv get request from
-
 		/* ********** This is a must send to outdst, received from insrc ********** */
 		/* ********** Send number of indices ********** */
 		sendbufsize = mat->nonlocalbst[outdst + 1] - mat->nonlocalbst[outdst];
-		MPI_Send(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD);
+		printf("ID %2d, partener %2d, sendbufsize %d \n",par->id,outdst,sendbufsize);
+//		MPI_Send(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD);
+		MPI_Isend(&sendbufsize, 1, MPI_INT, outdst, 0, MPI_COMM_WORLD,&sendreq);
 		/* ********** Receive number of indices ********** */
 		MPI_Recv(&recvbufsize, 1, MPI_INT, insrc, MPI_ANY_TAG, MPI_COMM_WORLD,
 				&status);
 		/* ********** Receive number of indices ********** */
+		Bar(par->id);
 
 		if (par->id == showid)
 			DPRINTF("\nSEND ID: %2d  OUTDST: %2d (size %d) \t INSRC %2d (size %d)\n",par->id,outdst,sendbufsize,insrc,recvbufsize);
 
-		if (recvbufsize != 0)
+		if (recvbufsize != 0) {
 			wcalloc(recvidxbuf, int, recvbufsize,
 					"recvbuf get requested index");
+			wcalloc(sendvalbuf, double, recvbufsize,
+					"send out requested values");
+		}
 
 		/* ********** Send indices list ********** */
 		if (sendbufsize != 0)
@@ -694,21 +681,18 @@ void TransferVector(par_t *par, mat_t *mat) {
 		/* ********** send to insrc, received from outdst ********** */
 		/* ********** Prepare value list for insrc********** */
 
-		if (recvbufsize != 0)
-			wcalloc(sendvalbuf, double, recvbufsize,
-					"send out requested values");
 		for (k = 0; k < recvbufsize; ++k) {
-			if (par->id == showid) {
+			if (par->id == showid)
 				DPRINTF("sendidx[%d]=%d, blkrst=%d\n",k,recvidxbuf[k],par->blkrowst[par->id]);
-			}
 			sendvalbuf[k] =
 					par->localvec[recvidxbuf[k] - par->blkrowst[par->id]];
 		}
 		if (par->id == showid) {
+			DPRINTF("ID: %2d Output %d Value List from %d to %d ",par->id,recvbufsize,par->id,insrc);
 			wcdouble(sendvalbuf, recvbufsize, 0, par->id);
 		}
 
-		IDPASS(par->id, "Done prepare value list <++++++++");
+//		IDPASS(par->id, "Done prepare value list <++++++++");
 		/* ********** Send value list ********** */
 		MPI_Send(sendvalbuf, recvbufsize, MPI_DOUBLE, insrc, 0, MPI_COMM_WORLD);
 
@@ -737,9 +721,7 @@ void TransferVector(par_t *par, mat_t *mat) {
 	}
 
 }
-// int MPI_Send(void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 
-// int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
 
 void ComputeOutput(par_t *par, mat_t *mat) {
 	int k;
