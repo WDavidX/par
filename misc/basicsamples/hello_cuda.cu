@@ -39,4 +39,6 @@ cudaFree( ad );
 
 printf("%s\n", a);
 return EXIT_SUCCESS;
-} 
+}
+
+
