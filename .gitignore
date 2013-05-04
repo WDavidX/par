@@ -30,3 +30,7 @@ m*.ij
 m*.vec
 o*.vec
 ro*.vec
+
+# hw5
+sports.mat
+sports10.mat
