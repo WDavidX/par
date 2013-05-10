@@ -22,8 +22,8 @@ int main(int argc, char *argv[])
   cmdline_parse(&params, argc, argv);
 
   printf("********************************************************************************\n");
-  printf("cudasd (%d.%d.%d) Copyright 2013, W.X.\n", VER_MAJOR, VER_MINOR, VER_SUBMINOR);
-  printf("  nnbrs=%d, minsim=%.2f, nblocks=%d\n  nthreads=%d, nqrows=%d, ndrows=%d\n",
+  printf("cssd (%d.%d.%d) Copyright 2011, W.X.\n", VER_MAJOR, VER_MINOR, VER_SUBMINOR);
+  printf("  nnbrs=%d, minsim=%.2f, nblocks=%d, nthreads=%d, nqrows=%d, ndrows=%d\n",
       params.nnbrs, params.minsim, params.nblocks, params.nthreads, params.nqrows, params.ndrows);
   printf("  startid=%d, endid=%d\n",
       params.startid, params.endid);
@@ -35,11 +35,11 @@ int main(int argc, char *argv[])
   gk_clearwctimer(params.timer_4);
 
   gk_startwctimer(params.timer_global);
-  cudaComputeNeighbors(&params);
+
 //  if (params.usecuda)
 //    cudaComputeNeighbors(&params);
 //  else
-//    ompComputeNeighbors(&params);
+    ompComputeNeighbors(&params);
 
   gk_stopwctimer(params.timer_global);
 

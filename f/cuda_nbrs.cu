@@ -7,27 +7,24 @@
 \version\verbatim $Id: omp_nbrs.c 9585 2011-03-18 16:51:51Z karypis $ \endverbatim
 */
 
-extern "C" 
-{
+extern "C"{ 
 #include "simdocs.h"
 }
-
-
 #define NITERS          20
 
 void cudaFindNeighbors(params_t *params, vault_t *vault, int qID, int nqrows, 
          int dID, int ndrows, int *nallhits, sim_t **allhits);
-int wc_csr_GetSimilarRows_cuda(gk_csr_t *mat, int nqterms, int *qind, float *qval, 
+int gk_csr_cuda_GetSimilarRows(gk_csr_t *mat, int nqterms, int *qind, float *qval, 
         int simtype, int nsim, float minsim, gk_fkv_t *hits, int *i_marker,
-        gk_fkv_t *i_cand);		 
+        gk_fkv_t *i_cand);
 /*************************************************************************/
 /*! Top-level routine for computing the neighbors of each document */
 /**************************************************************************/
-void cudaComputeNeighbors(params_t *params)
+void ompComputeNeighbors(params_t *params)
 {
   int i, j, qID, dID, nqrows, ndrows;
   vault_t *vault;
-  gk_csr_t *mat;
+//  gk_csr_t *mat;
   sim_t **allhits;
   int *nallhits;
   FILE *fpout;
@@ -55,6 +52,7 @@ void cudaComputeNeighbors(params_t *params)
 
   gk_startwctimer(params->timer_1);
 
+  //omp_set_num_threads(params->nthreads);
 
   /* break the computations into chunks */
   for (qID=params->startid; qID<params->endid; qID+=params->nqrows) {
@@ -112,38 +110,40 @@ void cudaComputeNeighbors(params_t *params)
 }
 
 
+void cudaFindNeighbors(params_t *params, vault_t *vault, int qID, int nqrows, 
+         int dID, int ndrows, int *nallhits, sim_t **allhits)
+{
+
+
+}
 
 /*************************************************************************/
 /*! Computes the neighbors of a set of rows against the documents in
     vault->pmat using OpenMP */
 /**************************************************************************/
-void cudaFindNeighbors(params_t *params, vault_t *vault, int qID, int nqrows, 
+void ompFindNeighbors(params_t *params, vault_t *vault, int qID, int nqrows, 
          int dID, int ndrows, int *nallhits, sim_t **allhits)
 {
 
- 
 
 }
 
 
-		
-		
-int wc_csr_GetSimilarRows_cuda(gk_csr_t *mat, int nqterms, int *qind, float *qval, 
+__device__ void testAdd(int *a, int *b, int *c){
+	*c=*a+*b;
+}
+
+
+int gk_csr_cuda_GetSimilarRows(gk_csr_t *mat, int nqterms, int *qind, float *qval, 
         int simtype, int nsim, float minsim, gk_fkv_t *hits, int *i_marker,
         gk_fkv_t *i_cand){
+	
+	return 0;
+}
 
+/*
 
-		return nsim;
-}		
-
-
-
-
-
-
-
-
-int gk_csr_GetSimilarRowsbak(gk_csr_t *mat, int nqterms, int *qind, float *qval, 
+int gk_csr_GetSimilarRows(gk_csr_t *mat, int nqterms, int *qind, float *qval, 
         int simtype, int nsim, float minsim, gk_fkv_t *hits, int *i_marker,
         gk_fkv_t *i_cand)
 {
@@ -151,7 +151,7 @@ int gk_csr_GetSimilarRowsbak(gk_csr_t *mat, int nqterms, int *qind, float *qval,
   int *colptr, *colind, *marker;
   float *colval, *rnorms, mynorm, *rsums, mysum;
   gk_fkv_t *cand;
-	/*
+
   if (nqterms == 0)
     return 0;
 
@@ -249,11 +249,6 @@ int gk_csr_GetSimilarRowsbak(gk_csr_t *mat, int nqterms, int *qind, float *qval,
     gk_free((void **)&marker, LTERM);
   if (i_cand == NULL)
     gk_free((void **)&cand, LTERM);
-	*/
-  return nsim;
-}
 
-
-__device__ void testAdd(int *a, int *b, int *c){
-	*c=*a+*b;
-}
+  return nsim;}
+*/
