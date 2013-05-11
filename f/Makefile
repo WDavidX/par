@@ -5,8 +5,9 @@ OMPOPTIONS = --compiler-options -fopenmp --compiler-options -D__OPENMP__
 COMPILEROPTS=   --compiler-options -Wall  --compiler-options  -Wno-unused-variable
 #Standard Libraries
 STDLIBS = -lgcc_s -lm
+NVCCFLAGS= -arch sm_20
 
-CFLAGS = $(COPTIONS)  $(OPTFLAGS) $(STDLIBS) 
+CFLAGS = $(COPTIONS)  $(OPTFLAGS) $(STDLIBS) $(OMPOPTIONS) $(NVCCFLAGS)
 LIBS = $(STDLIBS)
 
 CSOURCE= getopt.c all_common.c all_cmdline.c util.c  cuda_main.c
