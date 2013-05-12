@@ -34,3 +34,5 @@ ro*.vec
 # hw5
 sports.mat
 sports10.mat
+*.mat~
+*.nnbrs~
