@@ -106,7 +106,7 @@ void cmdline_parse(params_t *params, int argc, char *argv[])
 
   /* initialize the params data structure */
   params->nnbrs     = 100;
-  params->minsim    = 0.25;
+  params->minsim    = 0.1;
   params->nblocks   = 1;
   params->nthreads  = 1;
   params->nqrows    = 5000;

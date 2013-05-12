@@ -671,7 +671,7 @@ void gk_csr_Normalize(gk_csr_t *mat, int what, int norm)
   int *ptr;
   float *val, sum;
 
-  if (what&GK_CSR_ROW && mat->rowval) {
+  if ((what&GK_CSR_ROW) && mat->rowval) {
     n   = mat->nrows;
     ptr = mat->rowptr;
     val = mat->rowval;
@@ -696,7 +696,7 @@ void gk_csr_Normalize(gk_csr_t *mat, int what, int norm)
     }
   }
 
-  if (what&GK_CSR_COL && mat->colval) {
+  if ( (what&GK_CSR_COL) && mat->colval) {
     n   = mat->ncols;
     ptr = mat->colptr;
     val = mat->colval;

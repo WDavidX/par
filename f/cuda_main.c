@@ -9,7 +9,8 @@
 
 
 #include "simdocs.h"
-
+//#include "cuPrintf.cuh"
+//#include "cuPrintf.cu"
 
 /*************************************************************************/
 /*! This is the entry point for finding simlar patents */
@@ -43,11 +44,11 @@ int main(int argc, char *argv[])
 
   gk_stopwctimer(params.timer_global);
 
-  printf("    wclock: %.2lfs\n", gk_getwctimer(params.timer_global));
-  printf("    timer1: %.2lfs\n", gk_getwctimer(params.timer_1));
-  printf("    timer2: %.2lfs\n", gk_getwctimer(params.timer_2));
-  printf("    timer3: %.2lfs\n", gk_getwctimer(params.timer_3));
-  printf("    timer4: %.2lfs\n", gk_getwctimer(params.timer_4));
+  printf("    wclock(sec):   %.2lf\n", gk_getwctimer(params.timer_global));
+  printf("    timer1:  CORE   (sec):   %.2lf\n", gk_getwctimer(params.timer_1));
+  printf("    timer2: EXTRMAT (sec):   %.2lf\n", gk_getwctimer(params.timer_2));
+  printf("    timer3:  CUDA   (sec):   %.2lf\n", gk_getwctimer(params.timer_3));
+  printf("    timer4: IDXMAT  (sec):   %.2lf\n", gk_getwctimer(params.timer_4));
   printf("********************************************************************************\n");
 
   exit(rc);

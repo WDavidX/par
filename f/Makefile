@@ -1,11 +1,11 @@
 CC = nvcc 
-OPTFLAGS = -O3 
+OPTFLAGS = -O3
 COPTIONS = -DLINUX -D_FILE_OFFSET_BITS=64 
 OMPOPTIONS = --compiler-options -fopenmp --compiler-options -D__OPENMP__
 COMPILEROPTS=   --compiler-options -Wall  --compiler-options  -Wno-unused-variable
 #Standard Libraries
 STDLIBS = -lgcc_s -lm
-NVCCFLAGS= -arch sm_20
+NVCCFLAGS= -arch=sm_20
 
 CFLAGS = $(COPTIONS)  $(OPTFLAGS) $(STDLIBS) $(OMPOPTIONS) $(NVCCFLAGS)
 LIBS = $(STDLIBS)
@@ -39,9 +39,12 @@ cuda_main.o: cuda_main.c Makefile
 cuda_nbrs.o:cuda_nbrs.cu Makefile
 	$(CC) -c  cuda_nbrs.cu $(CFLAGS)
 
+cuPrintf.o:cuPrintf.cu Makefile
+	$(CC) -c  cuPrintf.cu $(CFLAGS)
+
 	
-$(EXE): getopt.o all_common.o all_cmdline.o util.o  cuda_main.o  cuda_nbrs.o
-	$(CC) getopt.o all_common.o all_cmdline.o util.o  cuda_main.o  cuda_nbrs.o -o $(EXE) $(CFLAGS)
+$(EXE): getopt.o all_common.o all_cmdline.o util.o  cuda_main.o  cuda_nbrs.o 
+	$(CC) getopt.o all_common.o all_cmdline.o util.o  cuda_main.o  cuda_nbrs.o  -o $(EXE) $(CFLAGS)
 
 .PHONY: clean remake
 	
