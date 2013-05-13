@@ -28,6 +28,7 @@ extern "C" {
 #define PINT(x) do{ fprintf(stderr,"Line %d, %s=%d\n",__LINE__,#x,x);}while(0)
 #define PTR(x) do{ fprintf(stderr,"Line %d, %s=%p\n",__LINE__,#x,(void*)x);}while(0)
 #define DPINT(x) do{ int localvaluetoshow;	cudaMemcpy((void*) &localvaluetoshow,(void*)&(x),sizeof(int),cudaMemcpyDeviceToHost);	fprintf(stderr,"Line %d, %s=%d\n",__LINE__,#x,localvaluetoshow);}while(0)
+#define PSIMT(x) do{fprintf(stdout,"%d(%.1f) ",(x).pid,(x).sim.f);}while(0)
 
 #define iserr() do{ cudaError_t localcudaerror=cudaGetLastError(); if (cudaSuccess!=localcudaerror) {printf("!!! CUDA err Line %d: %d %s\n",__LINE__,localcudaerror,cudaGetErrorString(localcudaerror));} else {printf("CUDA OK Line %d\n",__LINE__);}}while(0)
 
@@ -51,58 +52,35 @@ extern "C" {
 
 __global__ void Sim(int *dcolind, float *dcolval, int *drowptr, int qID,
 		int dID, int parnqrows, int ndrows, sim_t *dout) {
-
 	int qrow = qID + blockIdx.x;
 	int drow = dID + threadIdx.x;
-
 	int qid = blockIdx.x;
 	int tid = threadIdx.x;
 	int qnum = drowptr[qrow + 1] - drowptr[qrow];
 	int dnum = drowptr[drow + 1] - drowptr[drow];
-
 	__shared__
 	int qind[CACHENUM];
-
 	__shared__
 	float qval[CACHENUM];
-
 	__shared__ sim_t
 	out[CUDABLKNTH];
 	/* Init output array */
 	out[tid].pid = drow;
 	out[tid].sim.f = 0.0;
-//	out[tid].sim.i = 1111111;
-	if (tid >= ndrows)
-		return;
-	/* calc output */
-	int qp, dp;
-	for (qp = tid; qp < qnum; qp += CUDABLKNTH) {
-		qind[qp] = dcolind[drowptr[qrow] + qp];
-		qval[qp] = dcolval[drowptr[qrow] + qp];
-	}
-	__syncthreads();
-	qp = 0;
-	dp = 0;
-
-//	while (dp < dnum && qp < qnum) {
-//		if (qind[qp] == dcolind[drowptr[drow] + dp]) {
-//			out[tid].sim.f += (qval[qp] * dcolval[drowptr[drow] + dp] + 0.001);
-//			dp += 1;
-//			qp += 1;
-//		} else if (qind[qp] < dcolind[drowptr[drow] + dp]) {
-//			qp += 1;
-//		} else {
-//			dp += 1;
-//		}
-//	}
-
-	for (qp = 0, dp = 0; qp < qnum && dp < dnum; qp += 1) {
-		if (qind[qp] == dcolind[drowptr[drow] + dp]) {
-			out[tid].sim.f += qval[qp] * dcolval[drowptr[drow] + dp] ;
-//			out[tid].sim.f += 1;
-			dp += 1;
-			while (qind[qp + 1] > dcolind[drowptr[drow] + dp] && dp < dnum)
+	if (tid < ndrows) {
+		int qp, dp;
+		for (qp = tid; qp < qnum; qp += CUDABLKNTH) {
+			qind[qp] = dcolind[drowptr[qrow] + qp];
+			qval[qp] = dcolval[drowptr[qrow] + qp];
+		}
+		__syncthreads();
+		for (qp = 0, dp = 0; qp < qnum && dp < dnum; qp += 1) {
+			if (qind[qp] == dcolind[drowptr[drow] + dp]) {
+				out[tid].sim.f += qval[qp] * dcolval[drowptr[drow] + dp];
 				dp += 1;
+				while (qind[qp + 1] > dcolind[drowptr[drow] + dp] && dp < dnum)
+					dp += 1;
+			}
 		}
 	}
 	sim_t *dvout = &dout[qid * blockDim.x];  // get the desired row
@@ -113,24 +91,65 @@ __global__ void Sim(int *dcolind, float *dcolval, int *drowptr, int qID,
 }
 
 void radsort(sim_t *a, sim_t *tmpa, int *count, int *counttmp, int num) {
-	const int endbits = RADBITS - 1;
 	int pos, k, n;
+//
+//	printf("\nInit State\n");
+//	for (k = 0; k < num; ++k) {
+//		if (a[k].sim.f > 0.1) {
+//			printf("%d$", k);
+//			PSIMT(a[k]);
+//		}
+//	}
+//	printf("\n");
+
 	for (pos = 0; pos < 32; pos += RADBITS) {
-		memset(count, 0, sizeof(int) * RADIX);
+		memset((void*) count, 0, sizeof(int) * RADIX);
 		for (k = 0; k < num; ++k) {
-			count[((a[k].sim.i) >> pos) %RADIX]++;
+			count[((a[k].sim.i) >> pos) % RADIX]++;
 		}
 		counttmp[0] = 0;
 		for (k = 1; k < RADIX; ++k) {
 			counttmp[k] = counttmp[k - 1] + count[k - 1];
 		}
 		for (k = 0; k < num; ++k) {
-			n = ((a[k].sim.i) >> pos) %RADIX;
+			n = ((a[k].sim.i) >> pos) % RADIX;
 			tmpa[counttmp[n]] = a[k];
 			counttmp[n]++;
 		}
+
+//		printf("\npos=%d pass=%d/%d\n", pos, pos / RADBITS + 1, 32 / RADBITS);
+//		for (k = 0; k < num; ++k) {
+//			if (tmpa[k].sim.f > 0.1) {
+//				printf("%d$", k);
+//				PSIMT(tmpa[k]);
+//			}
+//		}
+//		printf("\n");
+
+		memcpy(a, tmpa, sizeof(sim_t) * num);
 	}
-	memcpy(a, tmpa, sizeof(sim_t) * num);
+}
+
+#define NN (1<<10)
+void testrad() {
+	sim_t a[NN], tmpa[NN];
+	int count[RADIX];
+	int counttmp[RADIX];
+	int k;
+	for (k = 0; k < NN; ++k) {
+		a[k].pid = k;
+		a[k].sim.f = NN + 0.1 - k;
+		PSIMT(a[k]);
+	}
+	printf("\nStarted testing.\n");
+	for (k = 0; k < NN; ++k) {
+		a[k].pid = k;
+		a[k].sim.f = NN + 0.1 - k;
+		PSIMT(a[k]);
+	}
+	printf("\n");
+	radsort(a, tmpa, count, counttmp, NN);
+
 }
 
 /*************************************************************************/
@@ -203,12 +222,9 @@ void ompComputeNeighbors(params_t *params) {
 	sim_t *tmpa;
 	wcalloc(count, int, (RADIX));
 	wcalloc(counttmp, int, (RADIX));
-	wcalloc(tmpa, sim_t, (params->ndrows + params->nnbrs));
-	iserr()
-	;
-	PASSHERE()
-	;
+	wcalloc(tmpa, sim_t, houtnum);
 	for (qID = params->startid; qID < params->endid; qID += params->nqrows) {
+		memset(houtsave, 0, sizeof(sim_t) * (params->nqrows * houtnum));
 		nqrows = gk_min(params->nqrows, params->endid - qID);
 		printf(" Working on query block %d/%d nqrows %d\n", qID, ndocs, nqrows);
 		/* find the neighbors of the chunk */
@@ -221,62 +237,75 @@ void ompComputeNeighbors(params_t *params) {
 			Sim<<<nqrows,params->ndrows>>>
 			(dcolind,dcolval,drowptr,qID,dID,params->nqrows,ndrows,dout);
 			gk_stopwctimer(params->timer_3);
-
 			for (qblkidx = 0; qblkidx < nqrows; ++qblkidx) {
 				gk_startwctimer(params->timer_4);
 				cudaMemcpy(hout[qblkidx], &dout[qblkidx * params->ndrows],
 						sizeof(sim_t) * (params->ndrows), CPDH);
 				gk_stopwctimer(params->timer_4);
-
-				if (qblkidx == 0 && qID == 0 || 1) {
-					printf("\n---------- qID=%d dID=%d qblkidx =%d ----------\n", qID,
-							dID, qblkidx);
-					for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
-						if (hout[qblkidx][dblkidx].sim.i != 0)
-//						printf("%4d (%d)  ", hout[qblkidx][dblkidx].pid,
-//								hout[qblkidx][dblkidx].sim.i);
-							printf("%d->%d (%.3f)  ", qID + qblkidx,
-									hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
-					}
-
-				}
-
-				printf("\nUnsorted ---> queryid=%d\n", qID + qblkidx);
-//				for (i = 0; i < houtnum; ++i) {
-////					if (hout[qblkidx][i].sim.f >= params->minsim) {
-//					if (hout[qblkidx][i].sim.i != 0){
-//						printf("%d(%3d) ", hout[qblkidx][houtnum].pid,
-//								hout[qblkidx][houtnum].sim.i);
+//				if (qblkidx == 0 && qID == 0 || 1) {
+//					printf(
+//							"\n---------- qID=%d dID=%d qblkidx =%d ndrows=%d ----------\n",
+//							qID, dID, qblkidx, ndrows);
+//					for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
+//						if (hout[qblkidx][dblkidx].sim.i != 0)
+//							printf("%d->%d (%.3f)  ", qID + qblkidx,
+//									hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
 //					}
+//
 //				}
-//}
-				for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
-					if (hout[qblkidx][dblkidx].sim.f >params->minsim)
-						printf("%d->%d (%.3f)  ", qID + qblkidx,
-								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
-				}
+//
+//				printf("\nUnsorted ---> queryid=%d\n", qID + qblkidx);
+//
+//				for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
+//					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
+//						printf("%d->%d (%.3f)  ", qID + qblkidx, hout[qblkidx][dblkidx].pid,
+//								hout[qblkidx][dblkidx].sim.f);
+//				}
 
-			
-				
 				gk_startwctimer(params->timer_2);
-				radsort(hout[qblkidx], tmpa, count, counttmp,
-						(params->ndrows + params->nnbrs));
+				radsort(hout[qblkidx], tmpa, count, counttmp, houtnum);
 				gk_stopwctimer(params->timer_2);
 
-				printf("\nSorted ---> queryid=%d\n", qID + qblkidx);
-				
-				for (dblkidx = houtnum-1; dblkidx > houtnum-params->nnbrs; --dblkidx) {
-					if (hout[qblkidx][dblkidx].sim.f >params->minsim)
-						printf("%d->%d (%.3f)  ", qID + qblkidx,
+				printf("Sorted ---> queryid=%d\n", qID + qblkidx);
+				for (i = 0; i < params->nnbrs; ++i) {
+					dblkidx = houtnum - i;
+					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
+						printf("%d->%d (%.3f)  \n", qID + qblkidx,
 								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
 				}
-				
-				printf("\n", qID + qblkidx);
 
+//				printf("Sorted ---> queryid=%d\n", qID + qblkidx);
+//				for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {}
+//				for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
+//					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
+//						printf("%d->%d (%.3f)  ", qID + qblkidx, hout[qblkidx][dblkidx].pid,
+//								hout[qblkidx][dblkidx].sim.f);
+//				}
+//				for (i = 0; i < params->nnbrs; ++i) {
+//					dblkidx = houtnum - i;
+//					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
+//						printf("%d->%d (%.3f)  ", qID + qblkidx, hout[qblkidx][dblkidx].pid,
+//								hout[qblkidx][dblkidx].sim.f);
+//				}
+//				for (dblkidx = houtnum-1; dblkidx > houtnum-params->nnbrs; --dblkidx) {
+//					if (hout[qblkidx][dblkidx].sim.f >params->minsim)
+//						printf("%d->%d (%.3f)  ", qID + qblkidx,
+//								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
+//				}
+//				printf("\n", qID + qblkidx);
 			}
-
 		}
-
+		printf("fpout = %p\n", fpout);
+		if (fpout) {
+			for (i = 0; i < nqrows; i++) {
+				for (j = houtnum - 1;
+						j < houtnum - params->nnbrs && hout[i][j].sim.f >= params->minsim;
+						j--) {
+					fprintf(stdout, "%8d %8d %.3f\n", qID + i, hout[i][j].pid,
+							hout[i][j].sim.f);
+				}
+			}
+		}
 	}
 
 	gk_stopwctimer(params->timer_1);

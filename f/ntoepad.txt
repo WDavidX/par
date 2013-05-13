@@ -1,0 +1,84 @@
+	for (qID = params->startid; qID < params->endid; qID += params->nqrows) {
+		memset(houtsave, 0, sizeof(sim_t) * (params->nqrows * houtnum));
+		nqrows = gk_min(params->nqrows, params->endid - qID);
+		printf(" Working on query block %d/%d nqrows %d\n", qID, ndocs, nqrows);
+		/* find the neighbors of the chunk */
+		for (dID = 0; dID < vault->ndocs; dID += params->ndrows) {
+			ndrows = gk_min(params->ndrows, vault->ndocs - dID);
+			dblkidx = dID / params->ndrows;
+			gk_startwctimer(params->timer_3);
+			printf("       Working on doc block %d/%d ndrows %d\n", dID, ndocs,
+					ndrows);
+			Sim<<<nqrows,params->ndrows>>>
+			(dcolind,dcolval,drowptr,qID,dID,params->nqrows,ndrows,dout);
+			gk_stopwctimer(params->timer_3);
+			for (qblkidx = 0; qblkidx < nqrows; ++qblkidx) {
+				gk_startwctimer(params->timer_4);
+				cudaMemcpy(hout[qblkidx], &dout[qblkidx * params->ndrows],
+						sizeof(sim_t) * (params->ndrows), CPDH);
+				gk_stopwctimer(params->timer_4);
+//				if (qblkidx == 0 && qID == 0 || 1) {
+//					printf(
+//							"\n---------- qID=%d dID=%d qblkidx =%d ndrows=%d ----------\n",
+//							qID, dID, qblkidx, ndrows);
+//					for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
+//						if (hout[qblkidx][dblkidx].sim.i != 0)
+//							printf("%d->%d (%.3f)  ", qID + qblkidx,
+//									hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
+//					}
+//
+//				}
+//
+//				printf("\nUnsorted ---> queryid=%d\n", qID + qblkidx);
+//
+//				for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
+//					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
+//						printf("%d->%d (%.3f)  ", qID + qblkidx, hout[qblkidx][dblkidx].pid,
+//								hout[qblkidx][dblkidx].sim.f);
+//				}
+
+				gk_startwctimer(params->timer_2);
+				radsort(hout[qblkidx], tmpa, count, counttmp, houtnum);
+				gk_stopwctimer(params->timer_2);
+
+				printf("Sorted ---> queryid=%d\n", qID + qblkidx);
+				for (i = 0; i < params->nnbrs; ++i) {
+					dblkidx = houtnum - i;
+					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
+						printf("%d->%d (%.3f)  \n", qID + qblkidx,
+								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
+				}
+
+//				printf("Sorted ---> queryid=%d\n", qID + qblkidx);
+//				for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {}
+//				for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
+//					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
+//						printf("%d->%d (%.3f)  ", qID + qblkidx, hout[qblkidx][dblkidx].pid,
+//								hout[qblkidx][dblkidx].sim.f);
+//				}
+//				for (i = 0; i < params->nnbrs; ++i) {
+//					dblkidx = houtnum - i;
+//					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
+//						printf("%d->%d (%.3f)  ", qID + qblkidx, hout[qblkidx][dblkidx].pid,
+//								hout[qblkidx][dblkidx].sim.f);
+//				}
+//				for (dblkidx = houtnum-1; dblkidx > houtnum-params->nnbrs; --dblkidx) {
+//					if (hout[qblkidx][dblkidx].sim.f >params->minsim)
+//						printf("%d->%d (%.3f)  ", qID + qblkidx,
+//								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
+//				}
+//				printf("\n", qID + qblkidx);
+			}
+		}
+		printf("fpout = %p\n", fpout);
+		if (fpout) {
+			for (i = 0; i < nqrows; i++) {
+				for (j = houtnum - 1;
+						j < houtnum - params->nnbrs && hout[i][j].sim.f >= params->minsim;
+						j--) {
+					fprintf(stdout, "%8d %8d %.3f\n", qID + i, hout[i][j].pid,
+							hout[i][j].sim.f);
+				}
+			}
+		}
+	}
