@@ -46,9 +46,9 @@ int main(int argc, char *argv[])
 
   printf("    wclock(sec):   %.2lf\n", gk_getwctimer(params.timer_global));
   printf("    timer1:  CORE   (sec):   %.2lf\n", gk_getwctimer(params.timer_1));
-  printf("    timer2: EXTRMAT (sec):   %.2lf\n", gk_getwctimer(params.timer_2));
+  printf("    timer2: RADSORT (sec):   %.2lf\n", gk_getwctimer(params.timer_2));
   printf("    timer3:  CUDA   (sec):   %.2lf\n", gk_getwctimer(params.timer_3));
-  printf("    timer4: IDXMAT  (sec):   %.2lf\n", gk_getwctimer(params.timer_4));
+  printf("    timer4:  MEMCPY (sec):   %.2lf\n", gk_getwctimer(params.timer_4));
   printf("********************************************************************************\n");
 
   exit(rc);

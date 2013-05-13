@@ -20,7 +20,7 @@ extern "C" {
 #define NUMQROWS (2048)
 #define CACHENUM (2048)
 //#define NUMQROWS (1)
-#define RADBITS 8
+#define RADBITS 3
 #define RADIX (1<<RADBITS)
 
 #define PASSHERE() do{ fprintf(stdout,"Passline %d >--------------------------< Passline %d\n",__LINE__,__LINE__);}while(0)
@@ -29,9 +29,17 @@ extern "C" {
 #define PTR(x) do{ fprintf(stderr,"Line %d, %s=%p\n",__LINE__,#x,(void*)x);}while(0)
 #define DPINT(x) do{ int localvaluetoshow;	cudaMemcpy((void*) &localvaluetoshow,(void*)&(x),sizeof(int),cudaMemcpyDeviceToHost);	fprintf(stderr,"Line %d, %s=%d\n",__LINE__,#x,localvaluetoshow);}while(0)
 #define PSIMT(x) do{fprintf(stdout,"%d(%.1f) ",(x).pid,(x).sim.f);}while(0)
+#define PSIMVAL(x) do{fprintf(stdout,"%.1f   ",(x).pid,(x).sim.f);}while(0)
+
+#define wcint(a,n)\
+	do{ int local_k;\
+	fprintf(stdout,"Line %d, ArrayInt: %s   Number:%d \n",__LINE__, #a,n);\
+		for (local_k=0;local_k<n;++local_k)\
+			fprintf(stdout,"[%d]= %d   ",(local_k),(a[local_k]));\
+			fprintf(stdout,"\n");\
+	}while(0)
 
 #define iserr() do{ cudaError_t localcudaerror=cudaGetLastError(); if (cudaSuccess!=localcudaerror) {printf("!!! CUDA err Line %d: %d %s\n",__LINE__,localcudaerror,cudaGetErrorString(localcudaerror));} else {printf("CUDA OK Line %d\n",__LINE__);}}while(0)
-
 #define peekerr() do{ cudaError_t localcudaerror=cudaPeekAtLastError(); if (cudaSuccess!=localcudaerror) {printf("!!! CUDA err Line %d: %d %s\n",__LINE__,localcudaerror,cudaGetErrorString(localcudaerror));} else {printf("CUDA OK Line %d\n",__LINE__);}}while(0)
 
 #define wcalloc(PTR,TYPE, ALLOCNUM)\
@@ -52,36 +60,55 @@ extern "C" {
 
 __global__ void Sim(int *dcolind, float *dcolval, int *drowptr, int qID,
 		int dID, int parnqrows, int ndrows, sim_t *dout) {
-	int qrow = qID + blockIdx.x;
-	int drow = dID + threadIdx.x;
 	int qid = blockIdx.x;
 	int tid = threadIdx.x;
+	int drow = dID + threadIdx.x;
+	__shared__ sim_t
+	out[CUDABLKNTH];
+	/* Init output array */
+	out[tid].pid = drow;
+	out[tid].sim.f = 0.0;
+
+	int qp, dp;
+	int qrow = qID + blockIdx.x;
+
 	int qnum = drowptr[qrow + 1] - drowptr[qrow];
 	int dnum = drowptr[drow + 1] - drowptr[drow];
 	__shared__
 	int qind[CACHENUM];
 	__shared__
 	float qval[CACHENUM];
-	__shared__ sim_t
-	out[CUDABLKNTH];
-	/* Init output array */
-	out[tid].pid = drow;
-	out[tid].sim.f = 0.0;
 	if (tid < ndrows) {
-		int qp, dp;
 		for (qp = tid; qp < qnum; qp += CUDABLKNTH) {
 			qind[qp] = dcolind[drowptr[qrow] + qp];
 			qval[qp] = dcolval[drowptr[qrow] + qp];
 		}
-		__syncthreads();
-		for (qp = 0, dp = 0; qp < qnum && dp < dnum; qp += 1) {
+	}
+	__syncthreads();
+	if (tid < ndrows) {
+		qp = 0;
+		dp = 0;
+		while (qp < qnum && dp < dnum) {
 			if (qind[qp] == dcolind[drowptr[drow] + dp]) {
-				out[tid].sim.f += qval[qp] * dcolval[drowptr[drow] + dp];
+				out[tid].sim.f += qval[qp] * dcolval[drowptr[drow] + dp] ;
 				dp += 1;
-				while (qind[qp + 1] > dcolind[drowptr[drow] + dp] && dp < dnum)
+				qp += 1;
+			} else {
+				if (qind[qp] < dcolind[drowptr[drow] + dp]) {
+					qp += 1;
+				} else {
 					dp += 1;
+				}
 			}
 		}
+//		for (qp = 0, dp = 0; qp < qnum && dp < dnum; qp += 1) {
+//			if (qind[qp] == dcolind[drowptr[drow] + dp]) {
+//				out[tid].sim.f += qval[qp] * dcolval[drowptr[drow] + dp];
+//				dp += 1;
+//				while (qind[qp + 1] > dcolind[drowptr[drow] + dp] && dp < dnum)
+//					dp += 1;
+//			}
+//		}
 	}
 	sim_t *dvout = &dout[qid * blockDim.x];  // get the desired row
 	dvout[tid].pid = out[tid].pid;
@@ -90,65 +117,65 @@ __global__ void Sim(int *dcolind, float *dcolval, int *drowptr, int qID,
 
 }
 
-void radsort(sim_t *a, sim_t *tmpa, int *count, int *counttmp, int num) {
-	int pos, k, n;
-//
-//	printf("\nInit State\n");
-//	for (k = 0; k < num; ++k) {
-//		if (a[k].sim.f > 0.1) {
-//			printf("%d$", k);
-//			PSIMT(a[k]);
-//		}
-//	}
-//	printf("\n");
+void showa(sim_t *aa,int num){
+		for (int k = 0; k < num; ++k) {
+			PSIMVAL(aa[k]);
+		}
+		printf("\n");
+	}
 
+void radsort(sim_t *a, sim_t *b, int *c, int *counttmp, int num) {
+	int pos, k, n;	
+//	showa(a,num);	
+//	printf("Radbits=%d Radix=%d\n",RADBITS,RADIX);
 	for (pos = 0; pos < 32; pos += RADBITS) {
-		memset((void*) count, 0, sizeof(int) * RADIX);
+//		printf("\npos=%d\n",pos);
+		memset((void*) c, 0, sizeof(int) * RADIX);
 		for (k = 0; k < num; ++k) {
-			count[((a[k].sim.i) >> pos) % RADIX]++;
+			c[(a[k].sim.i >> pos) % RADIX]++;
+		}		
+//		wcint(c,RADIX);
+		for (k=1;k<RADIX;++k){
+			c[k]=c[k]+c[k-1];
 		}
-		counttmp[0] = 0;
-		for (k = 1; k < RADIX; ++k) {
-			counttmp[k] = counttmp[k - 1] + count[k - 1];
+//		wcint(c,RADIX);		
+		for (k=num-1;k>=0;--k){
+			n=(a[k].sim.i >> pos) % RADIX;
+			c[n]--;	
+			b[c[n]]=a[k];
+//			PSIMT(a[k]);					
 		}
-		for (k = 0; k < num; ++k) {
-			n = ((a[k].sim.i) >> pos) % RADIX;
-			tmpa[counttmp[n]] = a[k];
-			counttmp[n]++;
-		}
-
-//		printf("\npos=%d pass=%d/%d\n", pos, pos / RADBITS + 1, 32 / RADBITS);
-//		for (k = 0; k < num; ++k) {
-//			if (tmpa[k].sim.f > 0.1) {
-//				printf("%d$", k);
-//				PSIMT(tmpa[k]);
-//			}
-//		}
 //		printf("\n");
-
-		memcpy(a, tmpa, sizeof(sim_t) * num);
+//		wcint(c,RADIX);
+		memcpy(a, b, sizeof(sim_t) * num);
+//		showa(a,num);
 	}
 }
 
-#define NN (1<<10)
+
+
+#define NN (10)
 void testrad() {
 	sim_t a[NN], tmpa[NN];
 	int count[RADIX];
 	int counttmp[RADIX];
 	int k;
-	for (k = 0; k < NN; ++k) {
-		a[k].pid = k;
-		a[k].sim.f = NN + 0.1 - k;
-		PSIMT(a[k]);
-	}
 	printf("\nStarted testing.\n");
 	for (k = 0; k < NN; ++k) {
 		a[k].pid = k;
-		a[k].sim.f = NN + 0.1 - k;
+//		a[k].sim.f = NN + 0.1 - k;
+		a[k].sim.f = (NN + 4 - k) % NN + 0.1;
+//		a[k].sim.f=k+0.1;
 		PSIMT(a[k]);
 	}
 	printf("\n");
 	radsort(a, tmpa, count, counttmp, NN);
+	printf("\nAfter testing.\n");
+	for (k = 0; k < NN; ++k) {
+//		PSIMVAL(a[k]);
+		PSIMT(a[k]);
+	}
+	printf("\n");
 
 }
 
@@ -156,6 +183,8 @@ void testrad() {
 /*! Top-level routine for computing the neighbors of each document */
 /**************************************************************************/
 void ompComputeNeighbors(params_t *params) {
+	testrad();
+	exit(1);
 	int i, j, qID, dID, nqrows, ndrows;
 	vault_t *vault;
 	//gk_csr_t *mat;
@@ -232,80 +261,46 @@ void ompComputeNeighbors(params_t *params) {
 			ndrows = gk_min(params->ndrows, vault->ndocs - dID);
 			dblkidx = dID / params->ndrows;
 			gk_startwctimer(params->timer_3);
-			printf("       Working on doc block %d/%d ndrows %d\n", dID, ndocs,
-					ndrows);
+//			printf("       Working on doc block %d/%d ndrows %d\n", dID, ndocs,
+//					ndrows);
 			Sim<<<nqrows,params->ndrows>>>
 			(dcolind,dcolval,drowptr,qID,dID,params->nqrows,ndrows,dout);
 			gk_stopwctimer(params->timer_3);
+
 			for (qblkidx = 0; qblkidx < nqrows; ++qblkidx) {
 				gk_startwctimer(params->timer_4);
 				cudaMemcpy(hout[qblkidx], &dout[qblkidx * params->ndrows],
 						sizeof(sim_t) * (params->ndrows), CPDH);
 				gk_stopwctimer(params->timer_4);
-//				if (qblkidx == 0 && qID == 0 || 1) {
-//					printf(
-//							"\n---------- qID=%d dID=%d qblkidx =%d ndrows=%d ----------\n",
-//							qID, dID, qblkidx, ndrows);
-//					for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
-//						if (hout[qblkidx][dblkidx].sim.i != 0)
-//							printf("%d->%d (%.3f)  ", qID + qblkidx,
-//									hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
-//					}
-//
-//				}
-//
-//				printf("\nUnsorted ---> queryid=%d\n", qID + qblkidx);
-//
-//				for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
-//					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
-//						printf("%d->%d (%.3f)  ", qID + qblkidx, hout[qblkidx][dblkidx].pid,
-//								hout[qblkidx][dblkidx].sim.f);
-//				}
-
 				gk_startwctimer(params->timer_2);
 				radsort(hout[qblkidx], tmpa, count, counttmp, houtnum);
 				gk_stopwctimer(params->timer_2);
-
-				printf("Sorted ---> queryid=%d\n", qID + qblkidx);
-				for (i = 0; i < params->nnbrs; ++i) {
-					dblkidx = houtnum - i;
-					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
-						printf("%d->%d (%.3f)  \n", qID + qblkidx,
-								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
-				}
-
-//				printf("Sorted ---> queryid=%d\n", qID + qblkidx);
-//				for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {}
-//				for (dblkidx = 0; dblkidx < ndrows; ++dblkidx) {
-//					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
-//						printf("%d->%d (%.3f)  ", qID + qblkidx, hout[qblkidx][dblkidx].pid,
-//								hout[qblkidx][dblkidx].sim.f);
-//				}
-//				for (i = 0; i < params->nnbrs; ++i) {
-//					dblkidx = houtnum - i;
-//					if (hout[qblkidx][dblkidx].sim.f > params->minsim)
-//						printf("%d->%d (%.3f)  ", qID + qblkidx, hout[qblkidx][dblkidx].pid,
-//								hout[qblkidx][dblkidx].sim.f);
-//				}
-//				for (dblkidx = houtnum-1; dblkidx > houtnum-params->nnbrs; --dblkidx) {
-//					if (hout[qblkidx][dblkidx].sim.f >params->minsim)
-//						printf("%d->%d (%.3f)  ", qID + qblkidx,
-//								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
-//				}
-//				printf("\n", qID + qblkidx);
 			}
 		}
-		printf("fpout = %p\n", fpout);
+
+//		for (qblkidx = 0; qblkidx < nqrows; ++qblkidx) {
+//			for (i = 0; i < params->nnbrs; ++i) {
+//				dblkidx = houtnum -1- i;}}
 		if (fpout) {
-			for (i = 0; i < nqrows; i++) {
-				for (j = houtnum - 1;
-						j < houtnum - params->nnbrs && hout[i][j].sim.f >= params->minsim;
-						j--) {
-					fprintf(stdout, "%8d %8d %.3f\n", qID + i, hout[i][j].pid,
-							hout[i][j].sim.f);
+			for (qblkidx = 0; qblkidx < nqrows; ++qblkidx) {
+				for (i = 0; i < params->nnbrs; ++i) {
+					dblkidx = houtnum - 1 - i;
+					if (hout[qblkidx][dblkidx].sim.f >= params->minsim) {
+//						fprintf(stdout, "%3d $ %8d %8d %.3f  \n", i, qID + qblkidx,
+//								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
+						fprintf(fpout, "%8d %8d %.3f  \n", qID + qblkidx,
+								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
+
+					} else {
+//					fprintf(stdout,"--->%3d $ %8d %8d %.3f  \n",i, qID + qblkidx, hout[qblkidx][dblkidx].pid,
+//												hout[qblkidx][dblkidx].sim.f);
+						break;
+					}
+
 				}
 			}
 		}
+
 	}
 
 	gk_stopwctimer(params->timer_1);
@@ -314,14 +309,18 @@ void ompComputeNeighbors(params_t *params) {
 	if (fpout)
 		gk_fclose(fpout);
 
-	FreeVault(vault);
 	PASSHERE()
 	;
+	printf("#docs: %d, #nnz: %d.\n", vault->ndocs,
+			vault->mat->rowptr[vault->mat->nrows]);
+
 	iserr()
 	;
+	FreeVault(vault);
 	return;
 }
 
 __device__ void testAdd(int *a, int *b, int *c) {
 	*c = *a + *b;
 }
+
