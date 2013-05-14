@@ -40,17 +40,25 @@ class info:
 
 def runonce(fin,fout,nnbrs,outdir='/tmp/xx/',indir='/export/scratch/csci5451_s13/hw2_data/'):
 	global zlogname
-	#cmd='mpirun -np '+str(np)+' --hostfile ~/hosts ~/f/matvec_mpi '+indir+matname+ ' '+indir+vecname+' '+outdir +  ' >> '+zlogname
-	cmd='./cssd -nthreads=8 -nnbrs='+str(nnbrs)+' '+indir+fin+' '+outdir+fout
+	cmd='./cssd -nthreads=8 -nnbrs='+str(nnbrs)+' '+indir+fin+' '+outdir+fout+' >!  '+zlogname
+	#cmd='./cssd -nthreads=8 -nnbrs='+str(nnbrs)+' '+indir+fin+' '+outdir+fout
 	print cmd
 	os.system(cmd)
 
+print "++++++++++++++++++++++++++++++"
+runinfo=info()
+zlogname='./zlog'+runinfo.infostart_local_str+'.txt'
+os.system('touch '+zlogname)
+print 'zlogname',zlogname, '  runinfo ',runinfo.infostart_local_str
 #nnbrlist=[100,50,20,10]
-nnbrlist=[100]
+nnbrlist=[10,20,50,100]
+#nnbrlist=[100]
 #filelist=['sport10']
-filelist=['sports3']
+filelist=['sports','sports10']
+#filelist=['sports']
 os.system('make')
 ###############################################################
 for fname in filelist:
 	for nnbr in nnbrlist:
-		runonce(fname+'.mat',fname+'.txt',nnbr,'/tmp/xx/','./')
+		runonce(fname+'.mat',fname+'.txt',nnbr,'/tmp/xx/')
+

@@ -16,11 +16,10 @@ extern "C" {
 #define CPHD cudaMemcpyHostToDevice
 
 #define CUDABLKNTH (1024)
-//#define CUDABLKNTH (4)
 #define NUMQROWS (2048)
 #define CACHENUM (2048)
 //#define NUMQROWS (1)
-#define RADBITS 3
+#define RADBITS 11
 #define RADIX (1<<RADBITS)
 
 #define PASSHERE() do{ fprintf(stdout,"Passline %d >--------------------------< Passline %d\n",__LINE__,__LINE__);}while(0)
@@ -183,8 +182,6 @@ void testrad() {
 /*! Top-level routine for computing the neighbors of each document */
 /**************************************************************************/
 void ompComputeNeighbors(params_t *params) {
-	testrad();
-	exit(1);
 	int i, j, qID, dID, nqrows, ndrows;
 	vault_t *vault;
 	//gk_csr_t *mat;
@@ -231,12 +228,12 @@ void ompComputeNeighbors(params_t *params) {
 	cudaMemcpy(dcolval, mat->rowval, sizeof(float) * (nnz), CPHD);
 
 	gk_stopwctimer(params->timer_3);
-	printf("    timer3:  CPHD   (sec):   %.2lf\n", params->timer_3);
+//	printf("    timer3:  CPHD   (sec):   %.2lf\n", params->timer_3);
 
 	/* ************ copy mat to device ****** */
 	sim_t *dout;
 	sim_t *houtsave;
-	int qblkidx, dblkidx, *tmpint, houtnum = params->ndrows + params->nnbrs;
+	int qblkidx, dblkidx,  houtnum = params->ndrows + params->nnbrs;
 
 	cudaMalloc((void**) &dout, sizeof(sim_t) * (params->nqrows * params->ndrows));
 	wccalloc(houtsave, sim_t,
@@ -244,7 +241,7 @@ void ompComputeNeighbors(params_t *params) {
 	sim_t **hout;
 	wcalloc(hout, sim_t*, sizeof(sim_t*) * (params->nqrows));
 	for (qblkidx = 0; qblkidx < params->nqrows; qblkidx += 1)
-		hout[qblkidx] = &houtsave[qblkidx * (params->ndrows + params->nnbrs)];
+		hout[qblkidx] = &houtsave[qblkidx * houtnum];
 
 	/* ************ radix sort init ****** */
 	int *count, *counttmp;
@@ -255,16 +252,15 @@ void ompComputeNeighbors(params_t *params) {
 	for (qID = params->startid; qID < params->endid; qID += params->nqrows) {
 		memset(houtsave, 0, sizeof(sim_t) * (params->nqrows * houtnum));
 		nqrows = gk_min(params->nqrows, params->endid - qID);
-		printf(" Working on query block %d/%d nqrows %d\n", qID, ndocs, nqrows);
+		//printf(" Working on query block %d/%d (%.2f%) nqrows %d\n", qID, ndocs,(100.0*qID)/ ndocs, nqrows);
 		/* find the neighbors of the chunk */
 		for (dID = 0; dID < vault->ndocs; dID += params->ndrows) {
 			ndrows = gk_min(params->ndrows, vault->ndocs - dID);
 			dblkidx = dID / params->ndrows;
+			
 			gk_startwctimer(params->timer_3);
-//			printf("       Working on doc block %d/%d ndrows %d\n", dID, ndocs,
-//					ndrows);
-			Sim<<<nqrows,params->ndrows>>>
-			(dcolind,dcolval,drowptr,qID,dID,params->nqrows,ndrows,dout);
+			/* CUDA kernel call for similarity calculation */
+			Sim<<<nqrows,params->ndrows>>> 		(dcolind,dcolval,drowptr,qID,dID,params->nqrows,ndrows,dout);
 			gk_stopwctimer(params->timer_3);
 
 			for (qblkidx = 0; qblkidx < nqrows; ++qblkidx) {
@@ -290,7 +286,6 @@ void ompComputeNeighbors(params_t *params) {
 //								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
 						fprintf(fpout, "%8d %8d %.3f  \n", qID + qblkidx,
 								hout[qblkidx][dblkidx].pid, hout[qblkidx][dblkidx].sim.f);
-
 					} else {
 //					fprintf(stdout,"--->%3d $ %8d %8d %.3f  \n",i, qID + qblkidx, hout[qblkidx][dblkidx].pid,
 //												hout[qblkidx][dblkidx].sim.f);
